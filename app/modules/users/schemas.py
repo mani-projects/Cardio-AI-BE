@@ -13,3 +13,4 @@ class UserPublic(BaseModel):
     full_name: str
     role: UserRole
     is_active: bool
+    is_email_verified: bool
