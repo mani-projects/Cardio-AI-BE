@@ -15,6 +15,20 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
 
+    otp_hmac_secret: str
+    otp_expire_minutes: int = 10
+    otp_max_attempts: int = 5
+    otp_resend_cooldown_seconds: int = 60
+    otp_max_sends_per_day: int = 10
+    unverified_account_grace_hours: int = 24
+
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "no-reply@cardioai.app"
+    smtp_from_name: str = "CardioAI"
+
     cors_origins: str = "http://localhost:3000"
 
     @property
