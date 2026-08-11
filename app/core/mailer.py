@@ -36,6 +36,7 @@ async def send_email(to: str, subject: str, html_body: str) -> None:
         username=settings.smtp_user or None,
         password=settings.smtp_password or None,
         start_tls=True,
+        timeout=10,
     )
 
 
