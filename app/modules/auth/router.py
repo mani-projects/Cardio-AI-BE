@@ -1,9 +1,10 @@
 import uuid
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.modules.auth.dependencies import get_current_user
@@ -28,6 +29,7 @@ from app.modules.users.models import User
 from app.modules.users.schemas import UserPublic
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+settings = get_settings()
 
 
 def _decode_refresh_claims(token: str) -> tuple[uuid.UUID, uuid.UUID]:
@@ -53,9 +55,13 @@ def _decode_refresh_claims(token: str) -> tuple[uuid.UUID, uuid.UUID]:
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+async def register(
+    payload: RegisterRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)
+) -> TokenResponse:
     try:
-        access_token, refresh_token = await register_learner(db, payload.email, payload.password, payload.full_name)
+        access_token, refresh_token = await register_learner(
+            db, payload.email, payload.password, payload.full_name, background_tasks
+        )
     except EmailAlreadyRegisteredError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already registered") from exc
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
@@ -101,10 +107,13 @@ async def me(current_user: User = Depends(get_current_user)) -> User:
 
 @router.post("/otp/resend", status_code=status.HTTP_204_NO_CONTENT)
 async def resend_otp_endpoint(
-    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    response: Response,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     try:
-        await resend_otp(db, current_user)
+        await resend_otp(db, current_user, background_tasks)
     except EmailAlreadyVerifiedError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already verified") from exc
     except OtpRateLimitedError as exc:
@@ -118,6 +127,9 @@ async def resend_otp_endpoint(
             detail=f"Please wait {exc.retry_after_seconds}s before requesting another code.",
             headers={"Retry-After": str(exc.retry_after_seconds)},
         ) from exc
+    # Tell the client exactly how long the next resend is blocked for, rather
+    # than letting it guess/duplicate this from a hardcoded constant.
+    response.headers["Retry-After"] = str(settings.otp_resend_cooldown_seconds)
     return None
 
 
