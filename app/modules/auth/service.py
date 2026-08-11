@@ -2,6 +2,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from fastapi import BackgroundTasks
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,19 +85,21 @@ async def _issue_tokens(db: AsyncSession, user: User) -> tuple[str, str]:
     return access_token, refresh_token
 
 
-async def _send_initial_otp(db: AsyncSession, user: User) -> None:
+async def _send_initial_otp(db: AsyncSession, user: User, background_tasks: BackgroundTasks) -> None:
     # Registration/reclaim must always hand back valid tokens — a resend-rate
     # limit hitting on this first send (only realistically possible if
     # `unverified_account_grace_hours` is misconfigured to under a minute)
     # should never turn into a failed signup. The user can still hit "resend"
     # from /verify-email once the cooldown clears.
     try:
-        await create_and_send_otp(db, user)
+        await create_and_send_otp(db, user, background_tasks)
     except (OtpCooldownError, OtpRateLimitedError):
         pass
 
 
-async def register_learner(db: AsyncSession, email: str, password: str, full_name: str) -> tuple[str, str]:
+async def register_learner(
+    db: AsyncSession, email: str, password: str, full_name: str, background_tasks: BackgroundTasks
+) -> tuple[str, str]:
     existing = await get_user_by_email(db, email)
 
     if existing is not None:
@@ -112,7 +115,7 @@ async def register_learner(db: AsyncSession, email: str, password: str, full_nam
         existing.hashed_password = hash_password(password)
         existing.full_name = full_name
         await db.commit()
-        await _send_initial_otp(db, existing)
+        await _send_initial_otp(db, existing, background_tasks)
         return await _issue_tokens(db, existing)
 
     user = User(
@@ -124,7 +127,7 @@ async def register_learner(db: AsyncSession, email: str, password: str, full_nam
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    await _send_initial_otp(db, user)
+    await _send_initial_otp(db, user, background_tasks)
     return await _issue_tokens(db, user)
 
 
@@ -168,7 +171,7 @@ async def _get_latest_otp(db: AsyncSession, user_id: uuid.UUID, *, for_update: b
     return result.scalar_one_or_none()
 
 
-async def create_and_send_otp(db: AsyncSession, user: User) -> None:
+async def create_and_send_otp(db: AsyncSession, user: User, background_tasks: BackgroundTasks) -> None:
     now = datetime.now(timezone.utc)
 
     latest = await _get_latest_otp(db, user.id)
@@ -193,13 +196,15 @@ async def create_and_send_otp(db: AsyncSession, user: User) -> None:
     )
     db.add(row)
     await db.commit()
-    await send_otp_email(user.email, user.full_name, code)
+    # Sending is a slow network round-trip to an external SMTP relay — run it
+    # after the response goes out instead of making the caller wait on it.
+    background_tasks.add_task(send_otp_email, user.email, user.full_name, code)
 
 
-async def resend_otp(db: AsyncSession, user: User) -> None:
+async def resend_otp(db: AsyncSession, user: User, background_tasks: BackgroundTasks) -> None:
     if user.is_email_verified:
         raise EmailAlreadyVerifiedError()
-    await create_and_send_otp(db, user)
+    await create_and_send_otp(db, user, background_tasks)
 
 
 async def verify_email_otp(db: AsyncSession, user: User, code: str) -> tuple[str, str]:
