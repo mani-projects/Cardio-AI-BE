@@ -7,15 +7,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.modules.auth.dependencies import get_current_user
-from app.modules.auth.schemas import LoginRequest, RefreshRequest, RegisterRequest, TokenResponse
+from app.modules.auth.schemas import LoginRequest, RefreshRequest, RegisterRequest, TokenResponse, VerifyOtpRequest
 from app.modules.auth.service import (
     EmailAlreadyRegisteredError,
+    EmailAlreadyVerifiedError,
     InvalidCredentialsError,
+    InvalidOtpError,
     InvalidRefreshTokenError,
+    OtpCooldownError,
+    OtpExpiredError,
+    OtpRateLimitedError,
     authenticate,
     register_learner,
+    resend_otp,
     revoke_refresh_token,
     rotate_refresh_token,
+    verify_email_otp,
 )
 from app.modules.users.models import User
 from app.modules.users.schemas import UserPublic
@@ -90,3 +97,48 @@ async def logout(payload: RefreshRequest, db: AsyncSession = Depends(get_db)) ->
 @router.get("/me", response_model=UserPublic)
 async def me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+@router.post("/otp/resend", status_code=status.HTTP_204_NO_CONTENT)
+async def resend_otp_endpoint(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> None:
+    try:
+        await resend_otp(db, current_user)
+    except EmailAlreadyVerifiedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already verified") from exc
+    except OtpRateLimitedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many verification codes requested today. Please try again tomorrow.",
+        ) from exc
+    except OtpCooldownError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Please wait {exc.retry_after_seconds}s before requesting another code.",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+    return None
+
+
+@router.post("/otp/verify", response_model=TokenResponse)
+async def verify_otp_endpoint(
+    payload: VerifyOtpRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    try:
+        access_token, refresh_token = await verify_email_otp(db, current_user, payload.code)
+    except EmailAlreadyVerifiedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already verified") from exc
+    except OtpExpiredError as exc:
+        detail = (
+            "That code expired. Request a new one."
+            if exc.retry_after_seconds is None
+            else "Too many incorrect attempts. Request a new code shortly."
+        )
+        headers = {"Retry-After": str(exc.retry_after_seconds)} if exc.retry_after_seconds else None
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail, headers=headers) from exc
+    except InvalidOtpError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That code is incorrect.") from exc
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
