@@ -1,0 +1,21 @@
+[Unit]
+Description=CardioAI backend (FastAPI)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+# Replace with the SSH user you deploy as (no separate service account —
+# keeps `git pull`/`uv sync` and the running service on the same permissions,
+# no chown juggling between deploys).
+User=REPLACE_WITH_YOUR_SSH_USER
+WorkingDirectory=/opt/cardio-ai-server
+ExecStart=/opt/cardio-ai-server/.venv/bin/fastapi run app/main.py --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+# Only reachable from this box (nginx proxies to it) — never bind 0.0.0.0 here.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
