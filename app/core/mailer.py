@@ -64,7 +64,11 @@ def _otp_email_html(full_name: str, code: str, expire_minutes: int) -> str:
 
 async def send_otp_email(to: str, full_name: str, code: str) -> None:
     if settings.is_development:
+        # Dev mode never hits real SMTP, even if live creds are sitting in
+        # .env — log the code instead of sending so local/test runs can't
+        # accidentally email a real address.
         logger.info("OTP code for %s: %s", to, code)
+        return
 
     try:
         await send_email(
@@ -74,3 +78,47 @@ async def send_otp_email(to: str, full_name: str, code: str) -> None:
         )
     except Exception:
         logger.exception("Failed to send OTP email to %s", to)
+
+
+def _password_reset_email_html(full_name: str, reset_link: str, expire_minutes: int) -> str:
+    return f"""
+    <div style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:#f8fafc; padding:32px 0;">
+      <div style="max-width:480px; margin:0 auto; background:#ffffff; border-radius:16px; padding:40px 32px; border:1px solid #e5e7eb;">
+        <p style="font-size:13px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#2563eb; margin:0 0 16px;">
+          CardioAI
+        </p>
+        <h1 style="font-size:20px; font-weight:700; color:#0f172a; margin:0 0 12px;">Reset your password</h1>
+        <p style="font-size:14px; color:#475569; margin:0 0 24px; line-height:1.6;">
+          Hi {full_name}, we received a request to reset your CardioAI password. This link expires in {expire_minutes} minutes.
+        </p>
+        <p style="text-align:center; margin:0 0 24px;">
+          <a href="{reset_link}" style="display:inline-block; background:#2563eb; color:#ffffff; font-size:14px; font-weight:600; text-decoration:none; border-radius:8px; padding:12px 28px;">
+            Reset password
+          </a>
+        </p>
+        <p style="font-size:13px; color:#94a3b8; margin:0 0 16px; line-height:1.6; word-break:break-all;">
+          If the button doesn't work, copy and paste this link into your browser:<br>{reset_link}
+        </p>
+        <p style="font-size:13px; color:#94a3b8; margin:0; line-height:1.6;">
+          If you didn't request this, you can safely ignore this email — your password will stay the same.
+        </p>
+      </div>
+    </div>
+    """
+
+
+async def send_password_reset_email(to: str, full_name: str, reset_link: str) -> None:
+    if settings.is_development:
+        # Same reasoning as send_otp_email: don't fall through to a real
+        # SMTP send in dev mode.
+        logger.info("Password reset link for %s: %s", to, reset_link)
+        return
+
+    try:
+        await send_email(
+            to,
+            subject="Reset your CardioAI password",
+            html_body=_password_reset_email_html(full_name, reset_link, settings.reset_token_expire_minutes),
+        )
+    except Exception:
+        logger.exception("Failed to send password reset email to %s", to)
