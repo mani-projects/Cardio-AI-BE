@@ -30,6 +30,15 @@ def verify_otp_code(code: str, code_hash: str) -> bool:
     return hmac.compare_digest(hash_otp_code(code), code_hash)
 
 
+def hash_reset_token(token: str) -> str:
+    # HMAC-SHA256 with its own secret, same rationale as hash_otp_code: this
+    # is a high-entropy random token (secrets.token_urlsafe(32)), not a
+    # short guessable code, so it's looked up directly by hash rather than
+    # verified against a known row — bcrypt's deliberate slowness would only
+    # add latency here, not security.
+    return hmac.new(settings.reset_token_hmac_secret.encode("utf-8"), token.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
 def _create_token(
     subject: str,
     expires_delta: timedelta,
