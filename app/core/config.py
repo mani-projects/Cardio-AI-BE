@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     otp_max_sends_per_day: int = 10
     unverified_account_grace_hours: int = 24
 
+    # password reset
+    # separate secret from JWT_SECRET_KEY/OTP_HMAC_SECRET on purpose — a leak
+    # of one shouldn't compromise the others.
+    reset_token_hmac_secret: str
+    reset_token_expire_minutes: int = 60
+    reset_token_resend_cooldown_seconds: int = 60
+    reset_token_max_sends_per_day: int = 10
+
+    # base URL of the frontend (cardio-ai), used to build the password-reset link
+    frontend_url: str = "http://localhost:3000"
+
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
