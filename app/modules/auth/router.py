@@ -8,7 +8,16 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.modules.auth.dependencies import get_current_user
-from app.modules.auth.schemas import LoginRequest, RefreshRequest, RegisterRequest, TokenResponse, VerifyOtpRequest
+from app.modules.auth.schemas import (
+    ForgotPasswordRequest,
+    LoginRequest,
+    MessageResponse,
+    RefreshRequest,
+    RegisterRequest,
+    ResetPasswordRequest,
+    TokenResponse,
+    VerifyOtpRequest,
+)
 from app.modules.auth.service import (
     EmailAlreadyRegisteredError,
     EmailAlreadyVerifiedError,
@@ -18,9 +27,13 @@ from app.modules.auth.service import (
     OtpCooldownError,
     OtpExpiredError,
     OtpRateLimitedError,
+    ResetTokenExpiredError,
+    ResetTokenInvalidError,
     authenticate,
     register_learner,
+    request_password_reset,
     resend_otp,
+    reset_password,
     revoke_refresh_token,
     rotate_refresh_token,
     verify_email_otp,
@@ -154,3 +167,26 @@ async def verify_otp_endpoint(
     except InvalidOtpError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That code is incorrect.") from exc
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/forgot-password", response_model=MessageResponse, status_code=status.HTTP_202_ACCEPTED)
+async def forgot_password(
+    payload: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)
+) -> MessageResponse:
+    # Same response every time, on purpose — this endpoint must not reveal
+    # whether an account exists for the given email.
+    await request_password_reset(db, payload.email, background_tasks)
+    return MessageResponse(detail="If an account exists for that email, a password reset link has been sent.")
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password_endpoint(payload: ResetPasswordRequest, db: AsyncSession = Depends(get_db)) -> MessageResponse:
+    try:
+        await reset_password(db, payload.token, payload.new_password)
+    except ResetTokenExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE, detail="This reset link has expired. Request a new one."
+        ) from exc
+    except ResetTokenInvalidError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This reset link is invalid.") from exc
+    return MessageResponse(detail="Your password has been reset.")
