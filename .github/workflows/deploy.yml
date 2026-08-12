@@ -17,4 +17,5 @@ jobs:
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
             cd /opt/cardio-ai-server
+            git pull
             ./deploy/deploy.sh
