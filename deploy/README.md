@@ -89,8 +89,15 @@ sudo ufw status
 After this one-time setup, ship updates with:
 
 ```bash
+git pull
 ./deploy/deploy.sh
 ```
+
+Always `git pull` *before* running the script, as a separate command — never
+let `deploy.sh` pull itself while it's running. Overwriting a script's own
+file mid-execution corrupts bash's read of it (it can keep executing stale
+lines even after `git pull` reports success), which is exactly what broke
+the CI deploy the first time this was wired up.
 
 ## Frontend
 
