@@ -3,20 +3,21 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import BackgroundTasks
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.mailer import send_otp_email
+from app.core.mailer import send_otp_email, send_password_reset_email
 from app.core.security import (
     create_access_token,
     create_refresh_token,
     hash_otp_code,
     hash_password,
+    hash_reset_token,
     verify_otp_code,
     verify_password,
 )
-from app.modules.auth.models import EmailOtp, RefreshToken
+from app.modules.auth.models import EmailOtp, PasswordResetToken, RefreshToken
 from app.modules.users.models import User, UserRole
 
 settings = get_settings()
@@ -59,6 +60,24 @@ class OtpCooldownError(AuthError):
 
 
 class OtpRateLimitedError(AuthError):
+    pass
+
+
+class ResetTokenInvalidError(AuthError):
+    pass
+
+
+class ResetTokenExpiredError(AuthError):
+    pass
+
+
+class ResetTokenCooldownError(AuthError):
+    def __init__(self, retry_after_seconds: int) -> None:
+        super().__init__()
+        self.retry_after_seconds = retry_after_seconds
+
+
+class ResetTokenRateLimitedError(AuthError):
     pass
 
 
@@ -240,3 +259,113 @@ async def verify_email_otp(db: AsyncSession, user: User, code: str) -> tuple[str
     user.is_email_verified = True
     await db.commit()
     return await _issue_tokens(db, user)
+
+
+async def _get_latest_reset_token(
+    db: AsyncSession, user_id: uuid.UUID, *, for_update: bool = False
+) -> PasswordResetToken | None:
+    stmt = (
+        select(PasswordResetToken)
+        .where(PasswordResetToken.user_id == user_id)
+        .order_by(PasswordResetToken.created_at.desc())
+        .limit(1)
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def _revoke_active_refresh_tokens(db: AsyncSession, user_id: uuid.UUID) -> None:
+    # A password reset should kill any session an attacker (or the user,
+    # from a lost device) might already hold — mirrors what logout does for
+    # a single token, but for every refresh token still outstanding.
+    await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(timezone.utc))
+    )
+
+
+async def create_and_send_reset_token(db: AsyncSession, user: User, background_tasks: BackgroundTasks) -> None:
+    now = datetime.now(timezone.utc)
+
+    latest = await _get_latest_reset_token(db, user.id)
+    if latest is not None:
+        elapsed = (now - latest.created_at).total_seconds()
+        if elapsed < settings.reset_token_resend_cooldown_seconds:
+            raise ResetTokenCooldownError(int(settings.reset_token_resend_cooldown_seconds - elapsed))
+
+    day_ago = now - timedelta(hours=24)
+    sent_today_stmt = select(func.count()).select_from(PasswordResetToken).where(
+        PasswordResetToken.user_id == user.id, PasswordResetToken.created_at >= day_ago
+    )
+    sent_today = (await db.execute(sent_today_stmt)).scalar_one()
+    if sent_today >= settings.reset_token_max_sends_per_day:
+        raise ResetTokenRateLimitedError()
+
+    # A fresh request supersedes any still-outstanding token for this user —
+    # only the most recently requested link should work.
+    await db.execute(
+        update(PasswordResetToken)
+        .where(PasswordResetToken.user_id == user.id, PasswordResetToken.consumed_at.is_(None))
+        .values(consumed_at=now)
+    )
+
+    token = secrets.token_urlsafe(32)
+    row = PasswordResetToken(
+        user_id=user.id,
+        token_hash=hash_reset_token(token),
+        expires_at=now + timedelta(minutes=settings.reset_token_expire_minutes),
+    )
+    db.add(row)
+    await db.commit()
+
+    reset_link = f"{settings.frontend_url}/reset-password?token={token}"
+    # Sending is a slow network round-trip to an external SMTP relay — run it
+    # after the response goes out instead of making the caller wait on it.
+    background_tasks.add_task(send_password_reset_email, user.email, user.full_name, reset_link)
+
+
+async def request_password_reset(db: AsyncSession, email: str, background_tasks: BackgroundTasks) -> None:
+    # Deliberately never raises and always returns the same way, whether the
+    # email belongs to an account or not — the caller (router) must not be
+    # able to distinguish "sent" from "no such account" from "rate limited".
+    user = await get_user_by_email(db, email)
+    if user is None or not user.is_active:
+        return
+
+    try:
+        await create_and_send_reset_token(db, user, background_tasks)
+    except (ResetTokenCooldownError, ResetTokenRateLimitedError):
+        pass
+
+
+async def reset_password(db: AsyncSession, token: str, new_password: str) -> None:
+    token_hash = hash_reset_token(token)
+    stmt = select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+    row = (await db.execute(stmt)).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+
+    if row is None or row.consumed_at is not None:
+        raise ResetTokenInvalidError()
+    if row.expires_at < now:
+        raise ResetTokenExpiredError()
+
+    user = await get_user_by_id(db, row.user_id)
+    if user is None or not user.is_active:
+        raise ResetTokenInvalidError()
+
+    row.consumed_at = now
+    user.hashed_password = hash_password(new_password)
+
+    # Invalidate any other outstanding tokens and kill existing sessions —
+    # a password reset should not leave old links or old refresh tokens usable.
+    await db.execute(
+        update(PasswordResetToken)
+        .where(PasswordResetToken.user_id == user.id, PasswordResetToken.consumed_at.is_(None))
+        .values(consumed_at=now)
+    )
+    await _revoke_active_refresh_tokens(db, user.id)
+
+    await db.commit()
