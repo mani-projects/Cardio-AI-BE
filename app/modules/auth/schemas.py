@@ -60,5 +60,15 @@ class ResetPasswordRequest(BaseModel):
         return _check_password_strength(value)
 
 
+class ClaimAccountRequest(BaseModel):
+    token: str = Field(min_length=1)
+    new_password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_strength(cls, value: str) -> str:
+        return _check_password_strength(value)
+
+
 class MessageResponse(BaseModel):
     detail: str
