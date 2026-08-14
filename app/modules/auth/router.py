@@ -1,14 +1,16 @@
 import uuid
 
 import jwt
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.limiter import limiter
 from app.core.security import decode_token
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.schemas import (
+    ClaimAccountRequest,
     ForgotPasswordRequest,
     LoginRequest,
     MessageResponse,
@@ -19,6 +21,9 @@ from app.modules.auth.schemas import (
     VerifyOtpRequest,
 )
 from app.modules.auth.service import (
+    ClaimTokenAlreadyClaimedError,
+    ClaimTokenExpiredError,
+    ClaimTokenInvalidError,
     EmailAlreadyRegisteredError,
     EmailAlreadyVerifiedError,
     InvalidCredentialsError,
@@ -30,6 +35,7 @@ from app.modules.auth.service import (
     ResetTokenExpiredError,
     ResetTokenInvalidError,
     authenticate,
+    claim_account,
     register_learner,
     request_password_reset,
     resend_otp,
@@ -68,8 +74,12 @@ def _decode_refresh_claims(token: str) -> tuple[uuid.UUID, uuid.UUID]:
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("5/hour")
 async def register(
-    payload: RegisterRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)
+    request: Request,
+    payload: RegisterRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     try:
         access_token, refresh_token = await register_learner(
@@ -81,7 +91,8 @@ async def register(
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+@limiter.limit("10/minute")
+async def login(request: Request, payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
     try:
         access_token, refresh_token = await authenticate(db, payload.email, payload.password)
     except InvalidCredentialsError as exc:
@@ -190,3 +201,24 @@ async def reset_password_endpoint(payload: ResetPasswordRequest, db: AsyncSessio
     except ResetTokenInvalidError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This reset link is invalid.") from exc
     return MessageResponse(detail="Your password has been reset.")
+
+
+@router.post("/claim-account", response_model=TokenResponse)
+@limiter.limit("20/minute")
+async def claim_account_endpoint(
+    request: Request, payload: ClaimAccountRequest, db: AsyncSession = Depends(get_db)
+) -> TokenResponse:
+    try:
+        access_token, refresh_token = await claim_account(db, payload.token, payload.new_password)
+    except ClaimTokenExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE, detail="This claim link has expired. Contact support for a new one."
+        ) from exc
+    except ClaimTokenInvalidError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This claim link is invalid.") from exc
+    except ClaimTokenAlreadyClaimedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This account has already been claimed. Try logging in, or use 'Forgot password'.",
+        ) from exc
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
