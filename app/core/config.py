@@ -30,6 +30,19 @@ class Settings(BaseSettings):
     reset_token_resend_cooldown_seconds: int = 60
     reset_token_max_sends_per_day: int = 10
 
+    # account claiming (post-payment signup) — separate secret from the others
+    # on purpose, same reasoning as reset_token_hmac_secret above.
+    claim_token_hmac_secret: str
+    # 7 days — much longer than a password reset, since this is emailed to
+    # someone who may have paid weeks ago, not someone actively mid-reset.
+    claim_token_expire_minutes: int = 10080
+
+    # shared secret the frontend (cardio-ai) presents on the internal
+    # registrations write endpoints, which run before any user is logged in
+    # (checkout is anonymous) — same idea as the Google Sheets Apps Script's
+    # ADMIN_SECRET.
+    internal_api_key: str
+
     # base URL of the frontend (cardio-ai), used to build the password-reset link
     frontend_url: str = "http://localhost:3000"
 
