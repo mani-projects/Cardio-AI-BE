@@ -122,3 +122,44 @@ async def send_password_reset_email(to: str, full_name: str, reset_link: str) ->
         )
     except Exception:
         logger.exception("Failed to send password reset email to %s", to)
+
+
+def _claim_account_email_html(full_name: str, claim_link: str) -> str:
+    return f"""
+    <div style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:#f8fafc; padding:32px 0;">
+      <div style="max-width:480px; margin:0 auto; background:#ffffff; border-radius:16px; padding:40px 32px; border:1px solid #e5e7eb;">
+        <p style="font-size:13px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#2563eb; margin:0 0 16px;">
+          CardioAI
+        </p>
+        <h1 style="font-size:20px; font-weight:700; color:#0f172a; margin:0 0 12px;">Create your account password</h1>
+        <p style="font-size:14px; color:#475569; margin:0 0 24px; line-height:1.6;">
+          Hi {full_name}, use the link below to set a password for your CardioAI account and access your course.
+        </p>
+        <p style="text-align:center; margin:0 0 24px;">
+          <a href="{claim_link}" style="display:inline-block; background:#2563eb; color:#ffffff; font-size:14px; font-weight:600; text-decoration:none; border-radius:8px; padding:12px 28px;">
+            Create password
+          </a>
+        </p>
+        <p style="font-size:13px; color:#94a3b8; margin:0 0 16px; line-height:1.6; word-break:break-all;">
+          If the button doesn't work, copy and paste this link into your browser:<br>{claim_link}
+        </p>
+      </div>
+    </div>
+    """
+
+
+async def send_claim_account_email(to: str, full_name: str, claim_link: str) -> None:
+    if settings.is_development:
+        # Same reasoning as send_otp_email: don't fall through to a real
+        # SMTP send in dev mode.
+        logger.info("Account claim link for %s: %s", to, claim_link)
+        return
+
+    try:
+        await send_email(
+            to,
+            subject="Create your CardioAI account password",
+            html_body=_claim_account_email_html(full_name, claim_link),
+        )
+    except Exception:
+        logger.exception("Failed to send account claim email to %s", to)
