@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 import bcrypt
 import jwt
+from fastapi import Header, HTTPException, status
 
 from app.core.config import get_settings
 
@@ -37,6 +38,20 @@ def hash_reset_token(token: str) -> str:
     # verified against a known row — bcrypt's deliberate slowness would only
     # add latency here, not security.
     return hmac.new(settings.reset_token_hmac_secret.encode("utf-8"), token.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def hash_claim_token(token: str) -> str:
+    # Same rationale as hash_reset_token, own secret (claim_token_hmac_secret).
+    return hmac.new(settings.claim_token_hmac_secret.encode("utf-8"), token.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+async def verify_internal_api_key(x_internal_api_key: str = Header(...)) -> None:
+    # Gate for the internal registrations write endpoints: the frontend calls
+    # these server-to-server before any end-user session exists (checkout is
+    # anonymous), so JWT auth doesn't apply — a shared secret is the control,
+    # same idea as the Google Sheets Apps Script's ADMIN_SECRET.
+    if not hmac.compare_digest(x_internal_api_key, settings.internal_api_key):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
 
 def _create_token(
