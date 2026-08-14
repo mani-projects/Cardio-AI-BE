@@ -12,6 +12,8 @@ from app.core.database import Base
 
 # import every module's models so they register on Base.metadata before autogenerate runs
 from app.modules.auth import models as auth_models  # noqa: F401
+from app.modules.courses import models as courses_models  # noqa: F401
+from app.modules.registrations import models as registrations_models  # noqa: F401
 from app.modules.users import models as users_models  # noqa: F401
 
 # this is the Alembic Config object, which provides
