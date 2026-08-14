@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.core.config import get_settings
 from app.core.database import Base
 from app.core.security import hash_password
-from app.modules.auth.models import EmailOtp, PasswordResetToken, RefreshToken
+from app.modules.auth.models import AccountClaimToken, EmailOtp, PasswordResetToken, RefreshToken
+from app.modules.courses.models import Course
+from app.modules.registrations.models import Registration
 from app.modules.users.models import User, UserRole
 
 settings = get_settings()
@@ -47,9 +49,18 @@ async def db_session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
 
     # Service functions commit internally, so an outer-transaction rollback
     # wouldn't undo anything — clear the tables explicitly between tests
-    # instead. Order matters: children before the `users` parent.
+    # instead. Order matters: children before parents (Registration
+    # references both Course and User, so it must go before either).
     async with session_factory() as cleanup_session:
-        for model in (PasswordResetToken, EmailOtp, RefreshToken, User):
+        for model in (
+            PasswordResetToken,
+            EmailOtp,
+            RefreshToken,
+            AccountClaimToken,
+            Registration,
+            Course,
+            User,
+        ):
             await cleanup_session.execute(model.__table__.delete())
         await cleanup_session.commit()
 
@@ -80,6 +91,26 @@ def make_user(
         return user
 
     return _make_user
+
+
+@pytest_asyncio.fixture
+def make_course(
+    db_session: AsyncSession,
+) -> Callable[..., Awaitable[Course]]:
+    async def _make_course(
+        slug: str = "1",
+        title: str = "Test Course",
+        price_cents: int = 25000,
+        *,
+        is_active: bool = True,
+    ) -> Course:
+        course = Course(slug=slug, title=title, price_cents=price_cents, is_active=is_active)
+        db_session.add(course)
+        await db_session.commit()
+        await db_session.refresh(course)
+        return course
+
+    return _make_course
 
 
 @pytest_asyncio.fixture
