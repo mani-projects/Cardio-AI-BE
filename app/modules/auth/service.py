@@ -302,7 +302,7 @@ async def _get_latest_reset_token(
     return result.scalar_one_or_none()
 
 
-async def _revoke_active_refresh_tokens(db: AsyncSession, user_id: uuid.UUID) -> None:
+async def revoke_active_refresh_tokens(db: AsyncSession, user_id: uuid.UUID) -> None:
     # A password reset should kill any session an attacker (or the user,
     # from a lost device) might already hold — mirrors what logout does for
     # a single token, but for every refresh token still outstanding.
@@ -392,7 +392,7 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Non
         .where(PasswordResetToken.user_id == user.id, PasswordResetToken.consumed_at.is_(None))
         .values(consumed_at=now)
     )
-    await _revoke_active_refresh_tokens(db, user.id)
+    await revoke_active_refresh_tokens(db, user.id)
 
     await db.commit()
 
