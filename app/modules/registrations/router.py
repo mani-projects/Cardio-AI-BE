@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import verify_internal_api_key
-from app.modules.auth.dependencies import require_admin_or_internal_key
+from app.modules.auth.dependencies import require_admin_or_internal_key, require_roles
 from app.modules.courses.service import CourseNotFoundError
 from app.modules.registrations.models import RegistrationStatus
 from app.modules.registrations.schemas import (
@@ -17,14 +17,18 @@ from app.modules.registrations.schemas import (
     RegistrationRead,
 )
 from app.modules.registrations.service import (
+    RegistrationIsPaidError,
     RegistrationNotFoundError,
     create_pending_registration,
+    delete_registration,
     get_registration,
     list_registrations,
     mark_follow_up_sent,
     mark_registration_expired,
     mark_registration_paid,
 )
+from app.modules.users.models import User, UserRole
+
 router = APIRouter(prefix="/registrations", tags=["registrations"])
 
 
@@ -111,3 +115,24 @@ async def get_registration_endpoint(
     except RegistrationNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found") from exc
     return RegistrationRead.from_registration(registration)
+
+
+@router.delete("/{registration_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_registration_endpoint(
+    registration_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> None:
+    try:
+        registration = await get_registration(db, registration_id)
+    except RegistrationNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found") from exc
+
+    try:
+        await delete_registration(db, registration)
+    except RegistrationIsPaidError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Paid registrations can't be deleted — they're a financial record.",
+        ) from exc
+    return None
