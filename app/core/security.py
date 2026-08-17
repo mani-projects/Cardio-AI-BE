@@ -1,5 +1,8 @@
 import hashlib
 import hmac
+import random
+import secrets
+import string
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -10,6 +13,22 @@ from fastapi import Header, HTTPException, status
 from app.core.config import get_settings
 
 settings = get_settings()
+
+_TEMP_PASSWORD_ALPHABET = string.ascii_lowercase + string.digits
+_TEMP_PASSWORD_LENGTH = 14
+
+
+def generate_temporary_password() -> str:
+    # Used for admin-generated passwords (new-user creation, manual reset) —
+    # constructed to always satisfy the same strength check applied to
+    # user-chosen passwords (an uppercase letter and a digit/symbol) rather
+    # than generating-and-hoping, and shuffled with a CSPRNG so the fixed
+    # uppercase/digit slots aren't always in the same position.
+    body = [secrets.choice(_TEMP_PASSWORD_ALPHABET) for _ in range(_TEMP_PASSWORD_LENGTH - 2)]
+    body.append(secrets.choice(string.ascii_uppercase))
+    body.append(secrets.choice(string.digits))
+    random.SystemRandom().shuffle(body)
+    return "".join(body)
 
 
 def hash_password(password: str) -> str:
