@@ -25,6 +25,7 @@ triggered at whatever pace is wanted.
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from datetime import datetime
@@ -94,12 +95,28 @@ def _to_create_request(row: dict, *, level: str) -> RegistrationCreateRequest:
     )
 
 
-async def run(dry_run: bool) -> None:
-    webapp_url, secret = _apps_script_config()
+def _load_json_file(path: str, key: str) -> list[dict]:
+    with open(path) as f:
+        data = json.load(f)
+    if not data.get("success", True):
+        raise RuntimeError(f"{path} contains a failed response: {data.get('error')}")
+    return data.get(key, [])
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        paid_rows = await _fetch_paid_registrations(client, webapp_url, secret)
-        pending_rows = await _fetch_pending_leads(client, webapp_url, secret)
+
+async def run(dry_run: bool, paid_file: str | None, pending_file: str | None) -> None:
+    if paid_file or pending_file:
+        # Lets the two Apps Script calls be made separately (e.g. from a
+        # browser, when this sandbox's own HTTP clients can't reach Google
+        # directly) and their raw JSON responses fed in here instead.
+        if not (paid_file and pending_file):
+            raise SystemExit("--paid-file and --pending-file must be used together.")
+        paid_rows = _load_json_file(paid_file, "registrations")
+        pending_rows = _load_json_file(pending_file, "leads")
+    else:
+        webapp_url, secret = _apps_script_config()
+        async with httpx.AsyncClient(timeout=30) as client:
+            paid_rows = await _fetch_paid_registrations(client, webapp_url, secret)
+            pending_rows = await _fetch_pending_leads(client, webapp_url, secret)
 
     print(f"Fetched {len(paid_rows)} paid row(s) and {len(pending_rows)} pending row(s) from the Sheet.\n")
 
@@ -193,5 +210,13 @@ async def run(dry_run: bool) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="Preview only — fetch and validate, no DB writes.")
+    parser.add_argument(
+        "--paid-file",
+        help="Path to a saved exportPaidRegistrations JSON response, instead of calling the Apps Script directly.",
+    )
+    parser.add_argument(
+        "--pending-file",
+        help="Path to a saved listPendingLeads JSON response, instead of calling the Apps Script directly.",
+    )
     args = parser.parse_args()
-    asyncio.run(run(dry_run=args.dry_run))
+    asyncio.run(run(dry_run=args.dry_run, paid_file=args.paid_file, pending_file=args.pending_file))
