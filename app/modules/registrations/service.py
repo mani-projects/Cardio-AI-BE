@@ -19,6 +19,10 @@ class RegistrationNotFoundError(RegistrationError):
     pass
 
 
+class RegistrationIsPaidError(RegistrationError):
+    pass
+
+
 def _fields_from_payload(payload: RegistrationCreateRequest) -> dict:
     return dict(
         full_name=payload.full_name,
@@ -51,8 +55,48 @@ async def _get_by_session_id(
     return result.scalar_one_or_none()
 
 
+async def _get_by_course_and_email(
+    db: AsyncSession, course_id: uuid.UUID, email: str, *, for_update: bool = False
+) -> Registration | None:
+    # Case-insensitive, same reasoning as the user-dedup lookup in
+    # auth.service.find_or_create_user_for_registration. Most recent row wins
+    # if more than one somehow already exists (pre-dates this dedup).
+    stmt = (
+        select(Registration)
+        .where(Registration.course_id == course_id, func.lower(Registration.email) == email.lower())
+        .order_by(Registration.created_at.desc())
+        .limit(1)
+    )
+    if for_update:
+        stmt = stmt.with_for_update(of=Registration)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def create_pending_registration(db: AsyncSession, payload: RegistrationCreateRequest) -> Registration:
     course = await get_course_by_slug(db, payload.course_slug)
+
+    # Same email registering again for the same course (abandoned an earlier
+    # checkout and tried again, hit back and resubmitted, etc.) must not pile
+    # up a fresh pending row per attempt — the Stripe session id is unique
+    # every time, so that alone can't dedup this the way it does for
+    # mark_registration_paid. Lock first so two near-simultaneous submits for
+    # the same email serialize onto the same row instead of racing.
+    existing = await _get_by_course_and_email(db, course.id, payload.email, for_update=True)
+
+    if existing is not None:
+        if existing.status == RegistrationStatus.PAID:
+            # Already paid for this course — leave the paid record alone
+            # rather than reviving/duplicating it for a stray resubmission.
+            return existing
+
+        for key, value in _fields_from_payload(payload).items():
+            setattr(existing, key, value)
+        existing.stripe_session_id = payload.stripe_session_id
+        existing.status = RegistrationStatus.PENDING
+        await db.commit()
+        await db.refresh(existing)
+        return existing
 
     stmt = (
         pg_insert(Registration)
@@ -156,6 +200,16 @@ async def get_registration(db: AsyncSession, registration_id: uuid.UUID) -> Regi
     if registration is None:
         raise RegistrationNotFoundError(registration_id)
     return registration
+
+
+async def delete_registration(db: AsyncSession, registration: Registration) -> None:
+    # Paid registrations are a financial/historical record — never
+    # deletable, regardless of caller. Pending/expired leads (the actual
+    # target of this action) have no such constraint.
+    if registration.status == RegistrationStatus.PAID:
+        raise RegistrationIsPaidError(registration.id)
+    await db.delete(registration)
+    await db.commit()
 
 
 async def list_user_registrations(db: AsyncSession, user_id: uuid.UUID) -> list[Registration]:
