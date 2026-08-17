@@ -114,7 +114,12 @@ async def run(dry_run: bool, paid_file: str | None, pending_file: str | None) ->
         pending_rows = _load_json_file(pending_file, "leads")
     else:
         webapp_url, secret = _apps_script_config()
-        async with httpx.AsyncClient(timeout=30) as client:
+        # Apps Script Web App URLs respond with a 302 to a
+        # script.googleusercontent.com URL that carries the actual JSON body —
+        # httpx doesn't follow redirects by default, so without this the call
+        # "succeeds" against the redirect response itself (empty/non-JSON
+        # body), not the real payload.
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
             paid_rows = await _fetch_paid_registrations(client, webapp_url, secret)
             pending_rows = await _fetch_pending_leads(client, webapp_url, secret)
 
