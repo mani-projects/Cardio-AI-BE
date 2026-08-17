@@ -5,16 +5,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.auth.dependencies import require_roles
+from app.modules.auth.service import ResetTokenCooldownError, ResetTokenRateLimitedError
 from app.modules.registrations.schemas import RegistrationRead
 from app.modules.registrations.service import list_user_registrations
 from app.modules.users.models import User, UserRole
-from app.modules.users.schemas import PaginatedUsers, UserAdminRead
+from app.modules.users.schemas import (
+    GeneratedPasswordResponse,
+    PaginatedUsers,
+    UserAdminRead,
+    UserCreatedResponse,
+    UserCreateRequest,
+    UserUpdateRequest,
+)
 from app.modules.users.service import (
+    EmailAlreadyExistsError,
     UserAlreadyClaimedError,
+    UserNotClaimedError,
     UserNotFoundError,
+    admin_reset_password,
+    create_user,
+    delete_user,
     get_user,
     list_users,
     send_claim_email,
+    send_reset_email,
+    update_user,
 )
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -36,6 +51,21 @@ async def list_users_endpoint(
     return PaginatedUsers(
         items=[UserAdminRead.from_user(user) for user in items], total=total, page=page, page_size=page_size
     )
+
+
+@router.post("", response_model=UserCreatedResponse, status_code=status.HTTP_201_CREATED)
+async def create_user_endpoint(
+    payload: UserCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> UserCreatedResponse:
+    try:
+        user, password = await create_user(db, email=payload.email, full_name=payload.full_name, role=payload.role)
+    except EmailAlreadyExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="A user with this email already exists."
+        ) from exc
+    return UserCreatedResponse(user=UserAdminRead.from_user(user), password=password)
 
 
 @router.get("/{user_id}", response_model=UserAdminRead)
@@ -78,5 +108,102 @@ async def send_claim_email_endpoint(
     except UserAlreadyClaimedError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="This account has already been claimed."
+        ) from exc
+    return None
+
+
+@router.patch("/{user_id}", response_model=UserAdminRead)
+async def update_user_endpoint(
+    user_id: uuid.UUID,
+    payload: UserUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> UserAdminRead:
+    try:
+        user = await get_user(db, user_id)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
+
+    if user_id == admin.id:
+        if payload.role is not None and payload.role != admin.role:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot change your own role.")
+        if payload.is_active is False:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot deactivate your own account."
+            )
+
+    try:
+        updated = await update_user(
+            db,
+            user,
+            email=payload.email,
+            full_name=payload.full_name,
+            role=payload.role,
+            is_active=payload.is_active,
+            is_email_verified=payload.is_email_verified,
+        )
+    except EmailAlreadyExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="A user with this email already exists."
+        ) from exc
+    return UserAdminRead.from_user(updated)
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user_endpoint(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> None:
+    if user_id == admin.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own account.")
+
+    try:
+        user = await get_user(db, user_id)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
+
+    await delete_user(db, user)
+    return None
+
+
+@router.post("/{user_id}/reset-password", response_model=GeneratedPasswordResponse)
+async def admin_reset_password_endpoint(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> GeneratedPasswordResponse:
+    try:
+        user = await get_user(db, user_id)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
+
+    password = await admin_reset_password(db, user)
+    return GeneratedPasswordResponse(password=password)
+
+
+@router.post("/{user_id}/send-reset-email", status_code=status.HTTP_204_NO_CONTENT)
+async def send_reset_email_endpoint(
+    user_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> None:
+    try:
+        user = await get_user(db, user_id)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
+
+    try:
+        await send_reset_email(db, user, background_tasks)
+    except UserNotClaimedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This account hasn't been claimed yet — send a claim email instead.",
+        ) from exc
+    except (ResetTokenCooldownError, ResetTokenRateLimitedError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="A reset email was already sent recently. Please wait before sending another.",
         ) from exc
     return None
