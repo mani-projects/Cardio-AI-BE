@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.mailer import send_claim_account_email
+from app.core.mailer import send_claim_account_email, send_temporary_password_email
 from app.core.security import generate_temporary_password, hash_password
 from app.modules.auth.service import (
     create_and_send_reset_token,
@@ -91,7 +91,9 @@ async def _email_taken(db: AsyncSession, email: str, *, exclude_user_id: uuid.UU
     return (await db.execute(stmt)).scalar_one() > 0
 
 
-async def create_user(db: AsyncSession, *, email: str, full_name: str, role: UserRole) -> tuple[User, str]:
+async def create_user(
+    db: AsyncSession, *, email: str, full_name: str, role: UserRole, background_tasks: BackgroundTasks
+) -> tuple[User, str]:
     if await _email_taken(db, email):
         raise EmailAlreadyExistsError(email)
 
@@ -104,10 +106,15 @@ async def create_user(db: AsyncSession, *, email: str, full_name: str, role: Use
         # Admin-created accounts are vouched for directly — no OTP step,
         # unlike self-service registration.
         is_email_verified=True,
+        is_temporary_password=True,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    login_url = f"{settings.frontend_url}/login"
+    background_tasks.add_task(send_temporary_password_email, user.email, user.full_name, password, login_url)
+
     return user, password
 
 
@@ -152,6 +159,7 @@ async def admin_reset_password(db: AsyncSession, user: User) -> str:
     password = generate_temporary_password()
     was_unclaimed = user.hashed_password is None
     user.hashed_password = hash_password(password)
+    user.is_temporary_password = True
     if was_unclaimed:
         user.is_email_verified = True
     await revoke_active_refresh_tokens(db, user.id)
