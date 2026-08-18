@@ -14,6 +14,9 @@ class RegistrationStatus(StrEnum):
     PENDING = "pending"
     PAID = "paid"
     EXPIRED = "expired"
+    # Admin-granted seat, no Stripe session involved — see
+    # registrations.service.create_free_registration.
+    FREE = "free"
 
 
 class Registration(Base):
