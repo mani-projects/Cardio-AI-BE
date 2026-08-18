@@ -10,6 +10,7 @@ from app.core.database import Base
 from app.core.security import hash_password
 from app.modules.auth.models import AccountClaimToken, EmailOtp, PasswordResetToken, RefreshToken
 from app.modules.courses.models import Course
+from app.modules.faculty_applications.models import FacultyApplication
 from app.modules.registrations.models import Registration
 from app.modules.users.models import User, UserRole
 
@@ -58,6 +59,7 @@ async def db_session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
             RefreshToken,
             AccountClaimToken,
             Registration,
+            FacultyApplication,
             Course,
             User,
         ):
