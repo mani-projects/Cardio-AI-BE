@@ -33,6 +33,11 @@ class User(Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # True whenever the current password was set BY an admin (created-by-admin
+    # or admin-triggered reset) rather than chosen by the user themselves —
+    # drives the forced "set your own password" prompt after login. Flipped
+    # back to False the moment the user changes it via /auth/change-password.
+    is_temporary_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
