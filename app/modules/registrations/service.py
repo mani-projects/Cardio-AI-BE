@@ -179,6 +179,34 @@ async def mark_registration_paid(
     return registration, False, claim_required, claim_token
 
 
+async def create_free_registration(
+    db: AsyncSession, *, course_slug: str, user_id: uuid.UUID, full_name: str, email: str
+) -> Registration:
+    # Admin-granted seat — no Stripe session, so the usual dedup/idempotency
+    # keys (stripe_session_id, email+course) don't apply the same way; the
+    # caller already knows the exact user_id, so this just inserts directly.
+    course = await get_course_by_slug(db, course_slug)
+    registration = Registration(
+        course_id=course.id,
+        user_id=user_id,
+        stripe_session_id=f"free-{uuid.uuid4()}",
+        status=RegistrationStatus.FREE,
+        full_name=full_name,
+        email=email,
+        # Not collected for an admin-granted seat — these fields exist for the
+        # real registration form's data, not applicable here.
+        country="N/A",
+        city="N/A",
+        institution="N/A",
+        specialty="N/A",
+        paid_at=datetime.now(timezone.utc),
+    )
+    db.add(registration)
+    await db.commit()
+    await db.refresh(registration)
+    return registration
+
+
 async def mark_registration_expired(db: AsyncSession, stripe_session_id: str) -> None:
     registration = await _get_by_session_id(db, stripe_session_id, for_update=True)
     if registration is None or registration.status != RegistrationStatus.PENDING:
