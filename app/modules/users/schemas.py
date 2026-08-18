@@ -62,6 +62,10 @@ class UserCreateRequest(BaseModel):
     email: EmailStr
     full_name: str = Field(min_length=1, max_length=255)
     role: UserRole = UserRole.LEARNER
+    # Only meaningful when role=learner — admin free-registers them into this
+    # course instead of the normal paid Stripe flow. See
+    # registrations.service.create_free_registration.
+    course_slug: str | None = None
 
 
 class UserUpdateRequest(BaseModel):
@@ -77,6 +81,7 @@ class UserCreatedResponse(BaseModel):
     # Shown to the admin exactly once at creation time — never stored or
     # retrievable again, same as the generated-password reset response below.
     password: str
+    registration_created: bool = False
 
 
 class GeneratedPasswordResponse(BaseModel):
