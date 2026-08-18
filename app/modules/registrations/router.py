@@ -120,6 +120,7 @@ async def get_registration_endpoint(
 @router.delete("/{registration_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_registration_endpoint(
     registration_id: uuid.UUID,
+    force: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(require_roles(UserRole.ADMIN)),
 ) -> None:
@@ -129,7 +130,7 @@ async def delete_registration_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found") from exc
 
     try:
-        await delete_registration(db, registration)
+        await delete_registration(db, registration, allow_paid=force)
     except RegistrationIsPaidError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
