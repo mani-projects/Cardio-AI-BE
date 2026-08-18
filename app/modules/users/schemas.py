@@ -15,6 +15,9 @@ class UserPublic(BaseModel):
     role: UserRole
     is_active: bool
     is_email_verified: bool
+    # Drives the forced "set your own password" prompt on the frontend —
+    # true until the user changes it via /auth/change-password.
+    is_temporary_password: bool
 
 
 class UserAdminRead(BaseModel):
@@ -31,6 +34,7 @@ class UserAdminRead(BaseModel):
     # Whether this account has a usable password: a real signup, or a
     # pre-provisioned (payment-only) account someone has since claimed.
     account_claimed: bool
+    is_temporary_password: bool
 
     @classmethod
     def from_user(cls, user: User) -> "UserAdminRead":
@@ -43,6 +47,7 @@ class UserAdminRead(BaseModel):
             is_email_verified=user.is_email_verified,
             created_at=user.created_at,
             account_claimed=user.hashed_password is not None,
+            is_temporary_password=user.is_temporary_password,
         )
 
 
