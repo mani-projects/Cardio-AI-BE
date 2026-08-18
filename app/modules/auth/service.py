@@ -384,6 +384,7 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Non
 
     row.consumed_at = now
     user.hashed_password = hash_password(new_password)
+    user.is_temporary_password = False
 
     # Invalidate any other outstanding tokens and kill existing sessions —
     # a password reset should not leave old links or old refresh tokens usable.
@@ -394,6 +395,24 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Non
     )
     await revoke_active_refresh_tokens(db, user.id)
 
+    await db.commit()
+
+
+class InvalidCurrentPasswordError(AuthError):
+    pass
+
+
+async def change_password(db: AsyncSession, user: User, current_password: str, new_password: str) -> None:
+    # A logged-in user changing a password they already know (temporary or
+    # not) — unlike reset_password/claim_account, this never touches other
+    # sessions: it's routine self-service, not a compromise-recovery flow, and
+    # revoking the caller's own refresh token here would log them straight
+    # back out right after they did the responsible thing.
+    if user.hashed_password is None or not verify_password(current_password, user.hashed_password):
+        raise InvalidCurrentPasswordError()
+
+    user.hashed_password = hash_password(new_password)
+    user.is_temporary_password = False
     await db.commit()
 
 
