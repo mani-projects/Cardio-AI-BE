@@ -10,6 +10,7 @@ from app.core.limiter import limiter
 from app.core.security import decode_token
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.schemas import (
+    ChangePasswordRequest,
     ClaimAccountRequest,
     ForgotPasswordRequest,
     LoginRequest,
@@ -27,6 +28,7 @@ from app.modules.auth.service import (
     EmailAlreadyRegisteredError,
     EmailAlreadyVerifiedError,
     InvalidCredentialsError,
+    InvalidCurrentPasswordError,
     InvalidOtpError,
     InvalidRefreshTokenError,
     OtpCooldownError,
@@ -35,6 +37,7 @@ from app.modules.auth.service import (
     ResetTokenExpiredError,
     ResetTokenInvalidError,
     authenticate,
+    change_password,
     claim_account,
     register_learner,
     request_password_reset,
@@ -201,6 +204,21 @@ async def reset_password_endpoint(payload: ResetPasswordRequest, db: AsyncSessio
     except ResetTokenInvalidError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This reset link is invalid.") from exc
     return MessageResponse(detail="Your password has been reset.")
+
+
+@router.post("/change-password", response_model=MessageResponse)
+@limiter.limit("10/minute")
+async def change_password_endpoint(
+    request: Request,
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    try:
+        await change_password(db, current_user, payload.current_password, payload.new_password)
+    except InvalidCurrentPasswordError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect.") from exc
+    return MessageResponse(detail="Your password has been changed.")
 
 
 @router.post("/claim-account", response_model=TokenResponse)
