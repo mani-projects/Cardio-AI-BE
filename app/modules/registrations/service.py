@@ -202,11 +202,13 @@ async def get_registration(db: AsyncSession, registration_id: uuid.UUID) -> Regi
     return registration
 
 
-async def delete_registration(db: AsyncSession, registration: Registration) -> None:
-    # Paid registrations are a financial/historical record — never
-    # deletable, regardless of caller. Pending/expired leads (the actual
-    # target of this action) have no such constraint.
-    if registration.status == RegistrationStatus.PAID:
+async def delete_registration(db: AsyncSession, registration: Registration, *, allow_paid: bool = False) -> None:
+    # Paid registrations are a financial/historical record — blocked by
+    # default regardless of caller. `allow_paid` is an explicit, deliberate
+    # override for the one legitimate case (an admin cleaning up their own
+    # test purchase) — the admin UI only sets it after a specific "this is a
+    # paid record" confirmation, never as a default.
+    if registration.status == RegistrationStatus.PAID and not allow_paid:
         raise RegistrationIsPaidError(registration.id)
     await db.delete(registration)
     await db.commit()
