@@ -12,6 +12,7 @@ from app.modules.auth.service import (
     issue_claim_token,
     revoke_active_refresh_tokens,
 )
+from app.modules.registrations.service import create_free_registration
 from app.modules.users.models import User, UserRole
 
 settings = get_settings()
@@ -92,8 +93,14 @@ async def _email_taken(db: AsyncSession, email: str, *, exclude_user_id: uuid.UU
 
 
 async def create_user(
-    db: AsyncSession, *, email: str, full_name: str, role: UserRole, background_tasks: BackgroundTasks
-) -> tuple[User, str]:
+    db: AsyncSession,
+    *,
+    email: str,
+    full_name: str,
+    role: UserRole,
+    background_tasks: BackgroundTasks,
+    course_slug: str | None = None,
+) -> tuple[User, str, bool]:
     if await _email_taken(db, email):
         raise EmailAlreadyExistsError(email)
 
@@ -112,10 +119,15 @@ async def create_user(
     await db.commit()
     await db.refresh(user)
 
+    registration_created = False
+    if course_slug is not None:
+        await create_free_registration(db, course_slug=course_slug, user_id=user.id, full_name=full_name, email=email)
+        registration_created = True
+
     login_url = f"{settings.frontend_url}/login"
     background_tasks.add_task(send_temporary_password_email, user.email, user.full_name, password, login_url)
 
-    return user, password
+    return user, password, registration_created
 
 
 async def update_user(
