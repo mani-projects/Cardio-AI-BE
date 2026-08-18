@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.modules.auth.dependencies import require_roles
 from app.modules.auth.service import ResetTokenCooldownError, ResetTokenRateLimitedError
+from app.modules.courses.service import CourseNotFoundError
 from app.modules.registrations.schemas import RegistrationRead
 from app.modules.registrations.service import list_user_registrations
 from app.modules.users.models import User, UserRole
@@ -60,19 +61,30 @@ async def create_user_endpoint(
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(require_roles(UserRole.ADMIN)),
 ) -> UserCreatedResponse:
+    if payload.course_slug is not None and payload.role != UserRole.LEARNER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Course assignment only applies to Learner accounts.",
+        )
+
     try:
-        user, password = await create_user(
+        user, password, registration_created = await create_user(
             db,
             email=payload.email,
             full_name=payload.full_name,
             role=payload.role,
             background_tasks=background_tasks,
+            course_slug=payload.course_slug,
         )
     except EmailAlreadyExistsError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="A user with this email already exists."
         ) from exc
-    return UserCreatedResponse(user=UserAdminRead.from_user(user), password=password)
+    except CourseNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown course") from exc
+    return UserCreatedResponse(
+        user=UserAdminRead.from_user(user), password=password, registration_created=registration_created
+    )
 
 
 @router.get("/{user_id}", response_model=UserAdminRead)
