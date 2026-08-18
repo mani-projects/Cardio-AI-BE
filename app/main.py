@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.core.limiter import limiter
 from app.modules.auth.router import router as auth_router
 from app.modules.courses.router import router as courses_router
+from app.modules.faculty_applications.router import router as faculty_applications_router
 from app.modules.registrations.router import router as registrations_router
 from app.modules.users.router import router as users_router
 
@@ -39,6 +40,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(courses_router, prefix="/api/v1")
+app.include_router(faculty_applications_router, prefix="/api/v1")
 app.include_router(registrations_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 
