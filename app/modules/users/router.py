@@ -56,11 +56,18 @@ async def list_users_endpoint(
 @router.post("", response_model=UserCreatedResponse, status_code=status.HTTP_201_CREATED)
 async def create_user_endpoint(
     payload: UserCreateRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(require_roles(UserRole.ADMIN)),
 ) -> UserCreatedResponse:
     try:
-        user, password = await create_user(db, email=payload.email, full_name=payload.full_name, role=payload.role)
+        user, password = await create_user(
+            db,
+            email=payload.email,
+            full_name=payload.full_name,
+            role=payload.role,
+            background_tasks=background_tasks,
+        )
     except EmailAlreadyExistsError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="A user with this email already exists."
