@@ -163,3 +163,57 @@ async def send_claim_account_email(to: str, full_name: str, claim_link: str) -> 
         )
     except Exception:
         logger.exception("Failed to send account claim email to %s", to)
+
+
+def _temporary_password_email_html(full_name: str, email: str, password: str, login_url: str) -> str:
+    return f"""
+    <div style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:#f8fafc; padding:32px 0;">
+      <div style="max-width:480px; margin:0 auto; background:#ffffff; border-radius:16px; padding:40px 32px; border:1px solid #e5e7eb;">
+        <p style="font-size:13px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#2563eb; margin:0 0 16px;">
+          CardioAI
+        </p>
+        <h1 style="font-size:20px; font-weight:700; color:#0f172a; margin:0 0 12px;">Your account is ready</h1>
+        <p style="font-size:14px; color:#475569; margin:0 0 24px; line-height:1.6;">
+          Hi {full_name}, an account has been created for you on CardioAI. Use the temporary password below to
+          log in — you'll be asked to set your own password right after.
+        </p>
+        <div style="background:#f1f5f9; border-radius:12px; padding:16px 20px; margin:0 0 24px;">
+          <p style="font-size:11px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:#94a3b8; margin:0 0 4px;">
+            Email
+          </p>
+          <p style="font-size:14px; font-weight:600; color:#0f172a; margin:0 0 12px;">{email}</p>
+          <p style="font-size:11px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:#94a3b8; margin:0 0 4px;">
+            Temporary password
+          </p>
+          <p style="font-size:18px; font-weight:700; font-family: ui-monospace, monospace; color:#0f172a; margin:0;">
+            {password}
+          </p>
+        </div>
+        <p style="text-align:center; margin:0 0 24px;">
+          <a href="{login_url}" style="display:inline-block; background:#2563eb; color:#ffffff; font-size:14px; font-weight:600; text-decoration:none; border-radius:8px; padding:12px 28px;">
+            Log in
+          </a>
+        </p>
+        <p style="font-size:13px; color:#94a3b8; margin:0; line-height:1.6;">
+          For your security, you'll be prompted to set your own password the first time you log in.
+        </p>
+      </div>
+    </div>
+    """
+
+
+async def send_temporary_password_email(to: str, full_name: str, password: str, login_url: str) -> None:
+    if settings.is_development:
+        # Same reasoning as send_otp_email: don't fall through to a real
+        # SMTP send in dev mode.
+        logger.info("Temporary password for %s: %s", to, password)
+        return
+
+    try:
+        await send_email(
+            to,
+            subject="Your CardioAI account is ready",
+            html_body=_temporary_password_email_html(full_name, to, password, login_url),
+        )
+    except Exception:
+        logger.exception("Failed to send temporary password email to %s", to)
