@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 
 import pytest_asyncio
@@ -9,9 +10,15 @@ from app.core.config import get_settings
 from app.core.database import Base
 from app.core.security import hash_password
 from app.modules.auth.models import AccountClaimToken, EmailOtp, PasswordResetToken, RefreshToken
-from app.modules.courses.models import Course
+from app.modules.case_attempts.models import CaseAttempt, CaseAttemptMode, CaseFeedback
+from app.modules.case_categories.models import CaseCategory
+from app.modules.cases.models import Case
+from app.modules.course_certificates.models import CourseCertificate
+from app.modules.course_lectures.models import CourseLecture, LectureSource, LectureWatchState
+from app.modules.course_resources.models import CourseResource, ResourceCategory
+from app.modules.courses.models import Course, CourseFaculty
 from app.modules.faculty_applications.models import FacultyApplication
-from app.modules.registrations.models import Registration
+from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.users.models import User, UserRole
 
 settings = get_settings()
@@ -60,6 +67,15 @@ async def db_session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
             AccountClaimToken,
             Registration,
             FacultyApplication,
+            CourseFaculty,
+            CaseFeedback,
+            CaseAttempt,
+            Case,
+            CaseCategory,
+            CourseResource,
+            LectureWatchState,
+            CourseLecture,
+            CourseCertificate,
             Course,
             User,
         ):
@@ -76,6 +92,7 @@ def make_user(
         password: str = "Str0ngPass!",
         full_name: str = "Test Learner",
         *,
+        role: UserRole = UserRole.LEARNER,
         is_active: bool = True,
         is_email_verified: bool = True,
     ) -> User:
@@ -83,7 +100,7 @@ def make_user(
             email=email,
             hashed_password=hash_password(password),
             full_name=full_name,
-            role=UserRole.LEARNER,
+            role=role,
             is_active=is_active,
             is_email_verified=is_email_verified,
         )
@@ -113,6 +130,216 @@ def make_course(
         return course
 
     return _make_course
+
+
+@pytest_asyncio.fixture
+def make_course_faculty(
+    db_session: AsyncSession,
+) -> Callable[..., Awaitable[CourseFaculty]]:
+    async def _make_course_faculty(
+        course: Course,
+        user: User,
+        *,
+        assigned_by: uuid.UUID | None = None,
+    ) -> CourseFaculty:
+        assignment = CourseFaculty(course_id=course.id, user_id=user.id, assigned_by=assigned_by)
+        db_session.add(assignment)
+        await db_session.commit()
+        await db_session.refresh(assignment)
+        return assignment
+
+    return _make_course_faculty
+
+
+@pytest_asyncio.fixture
+def make_case_category(
+    db_session: AsyncSession,
+) -> Callable[..., Awaitable[CaseCategory]]:
+    async def _make_case_category(
+        course: Course,
+        name: str = "CAD",
+        *,
+        is_active: bool = True,
+        sort_order: int = 0,
+    ) -> CaseCategory:
+        category = CaseCategory(course_id=course.id, name=name, is_active=is_active, sort_order=sort_order)
+        db_session.add(category)
+        await db_session.commit()
+        await db_session.refresh(category)
+        return category
+
+    return _make_case_category
+
+
+@pytest_asyncio.fixture
+def make_registration(
+    db_session: AsyncSession,
+) -> Callable[..., Awaitable[Registration]]:
+    async def _make_registration(
+        course: Course,
+        user: User | None = None,
+        *,
+        status: RegistrationStatus = RegistrationStatus.PAID,
+        full_name: str = "Test Learner",
+        email: str = "learner@example.com",
+    ) -> Registration:
+        registration = Registration(
+            course_id=course.id,
+            user_id=user.id if user is not None else None,
+            stripe_session_id=f"test-{uuid.uuid4()}",
+            status=status,
+            full_name=full_name,
+            email=email,
+            country="United Arab Emirates",
+            city="Dubai",
+            institution="Test Hospital",
+            specialty="Cardiology",
+        )
+        db_session.add(registration)
+        await db_session.commit()
+        await db_session.refresh(registration)
+        return registration
+
+    return _make_registration
+
+
+@pytest_asyncio.fixture
+def make_case(
+    db_session: AsyncSession,
+) -> Callable[..., Awaitable[Case]]:
+    async def _make_case(
+        course: Course,
+        category: CaseCategory,
+        faculty: User,
+        title: str = "Chest pain in a 54-year-old",
+        report_text: str = "Patient presents with...",
+        *,
+        answer_key_findings: dict | None = None,
+        imaging_reference: dict | None = None,
+    ) -> Case:
+        case = Case(
+            course_id=course.id,
+            category_id=category.id,
+            faculty_id=faculty.id,
+            title=title,
+            report_text=report_text,
+            answer_key_findings=answer_key_findings,
+            imaging_reference=imaging_reference,
+        )
+        db_session.add(case)
+        await db_session.commit()
+        await db_session.refresh(case)
+        return case
+
+    return _make_case
+
+
+@pytest_asyncio.fixture
+def make_case_attempt(
+    db_session: AsyncSession,
+) -> Callable[..., Awaitable[CaseAttempt]]:
+    async def _make_case_attempt(
+        case: Case,
+        learner: User,
+        *,
+        mode: CaseAttemptMode = CaseAttemptMode.FINDINGS,
+    ) -> CaseAttempt:
+        attempt = CaseAttempt(case_id=case.id, learner_id=learner.id, mode=mode)
+        db_session.add(attempt)
+        await db_session.commit()
+        await db_session.refresh(attempt)
+        return attempt
+
+    return _make_case_attempt
+
+
+@pytest_asyncio.fixture
+def make_course_resource(
+    db_session: AsyncSession,
+) -> Callable[..., Awaitable[CourseResource]]:
+    async def _make_course_resource(
+        course: Course,
+        *,
+        category: ResourceCategory = ResourceCategory.GUIDELINES,
+        title: str = "Test Guideline",
+        subtitle: str | None = None,
+        file_key: str | None = None,
+        content_type: str = "application/pdf",
+        file_size_bytes: int = 1024,
+        uploaded_by: uuid.UUID | None = None,
+    ) -> CourseResource:
+        resource = CourseResource(
+            course_id=course.id,
+            category=category,
+            title=title,
+            subtitle=subtitle,
+            file_key=file_key or f"course-resources/{course.id}/{uuid.uuid4()}.pdf",
+            content_type=content_type,
+            file_size_bytes=file_size_bytes,
+            uploaded_by=uploaded_by,
+        )
+        db_session.add(resource)
+        await db_session.commit()
+        await db_session.refresh(resource)
+        return resource
+
+    return _make_course_resource
+
+
+@pytest_asyncio.fixture
+def make_course_lecture(
+    db_session: AsyncSession,
+) -> Callable[..., Awaitable[CourseLecture]]:
+    async def _make_course_lecture(
+        course: Course,
+        *,
+        title: str = "Coronary Anatomy & Variants",
+        source: LectureSource = LectureSource.LINK,
+        video_url: str | None = "https://example.com/video.mp4",
+        file_key: str | None = None,
+        group_label: str | None = None,
+        sort_order: int = 0,
+        created_by: uuid.UUID | None = None,
+    ) -> CourseLecture:
+        lecture = CourseLecture(
+            course_id=course.id,
+            title=title,
+            source=source,
+            video_url=video_url if source == LectureSource.LINK else None,
+            file_key=file_key if source == LectureSource.UPLOAD else None,
+            group_label=group_label,
+            sort_order=sort_order,
+            created_by=created_by,
+        )
+        db_session.add(lecture)
+        await db_session.commit()
+        await db_session.refresh(lecture)
+        return lecture
+
+    return _make_course_lecture
+
+
+@pytest_asyncio.fixture
+def make_course_certificate(
+    db_session: AsyncSession,
+) -> Callable[..., Awaitable[CourseCertificate]]:
+    async def _make_course_certificate(
+        course: Course,
+        *,
+        file_key: str | None = None,
+        uploaded_by: uuid.UUID | None = None,
+    ) -> CourseCertificate:
+        certificate = CourseCertificate(
+            course_id=course.id,
+            file_key=file_key or f"course-certificates/{course.id}/{uuid.uuid4()}-certificate.pdf",
+            uploaded_by=uploaded_by,
+        )
+        db_session.add(certificate)
+        await db_session.commit()
+        await db_session.refresh(certificate)
+        return certificate
+
+    return _make_course_certificate
 
 
 @pytest_asyncio.fixture
