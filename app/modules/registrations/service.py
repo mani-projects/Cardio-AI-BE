@@ -248,6 +248,15 @@ async def list_user_registrations(db: AsyncSession, user_id: uuid.UUID) -> list[
     return list(result.scalars().all())
 
 
+async def has_course_access(db: AsyncSession, *, user_id: uuid.UUID, course_id: uuid.UUID) -> bool:
+    stmt = select(func.count()).select_from(Registration).where(
+        Registration.user_id == user_id,
+        Registration.course_id == course_id,
+        Registration.status.in_([RegistrationStatus.PAID, RegistrationStatus.FREE]),
+    )
+    return (await db.execute(stmt)).scalar_one() > 0
+
+
 async def list_registrations(
     db: AsyncSession,
     *,
