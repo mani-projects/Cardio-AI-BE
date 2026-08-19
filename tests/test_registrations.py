@@ -7,6 +7,7 @@ from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.registrations.schemas import RegistrationCreateRequest
 from app.modules.registrations.service import (
     create_pending_registration,
+    has_course_access,
     mark_registration_expired,
     mark_registration_paid,
 )
@@ -182,3 +183,48 @@ async def test_mark_registration_expired_is_a_noop_once_already_paid(db_session,
     )
     registration = result.scalar_one()
     assert registration.status == RegistrationStatus.PAID
+
+
+# ---------------------------------------------------------------------------
+# has_course_access
+# ---------------------------------------------------------------------------
+
+
+async def test_has_course_access_true_for_paid_registration(db_session, make_course, make_user, make_registration):
+    course = await make_course(slug="1")
+    user = await make_user()
+    await make_registration(course, user, status=RegistrationStatus.PAID)
+
+    assert await has_course_access(db_session, user_id=user.id, course_id=course.id) is True
+
+
+async def test_has_course_access_true_for_free_registration(db_session, make_course, make_user, make_registration):
+    course = await make_course(slug="1")
+    user = await make_user()
+    await make_registration(course, user, status=RegistrationStatus.FREE)
+
+    assert await has_course_access(db_session, user_id=user.id, course_id=course.id) is True
+
+
+async def test_has_course_access_false_for_pending_registration(db_session, make_course, make_user, make_registration):
+    course = await make_course(slug="1")
+    user = await make_user()
+    await make_registration(course, user, status=RegistrationStatus.PENDING)
+
+    assert await has_course_access(db_session, user_id=user.id, course_id=course.id) is False
+
+
+async def test_has_course_access_false_with_no_registration(db_session, make_course, make_user):
+    course = await make_course(slug="1")
+    user = await make_user()
+
+    assert await has_course_access(db_session, user_id=user.id, course_id=course.id) is False
+
+
+async def test_has_course_access_false_for_different_course(db_session, make_course, make_user, make_registration):
+    course_a = await make_course(slug="1")
+    course_b = await make_course(slug="2")
+    user = await make_user()
+    await make_registration(course_a, user, status=RegistrationStatus.PAID)
+
+    assert await has_course_access(db_session, user_id=user.id, course_id=course_b.id) is False
