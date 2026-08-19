@@ -55,6 +55,14 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:3000"
 
+    # object storage for faculty-uploaded PDFs/videos/certificates — the
+    # bucket is private, every read goes through a freshly-minted presigned
+    # GET URL (see app/core/storage.py), nothing is ever served directly.
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_region: str = "us-east-1"
+    aws_s3_bucket: str = ""
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
