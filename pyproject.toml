@@ -9,6 +9,7 @@ dependencies = [
     "alembic>=1.19.1",
     "asyncpg>=0.31.0",
     "bcrypt>=5.0.0",
+    "boto3>=1.43.74",
     "fastapi[standard]>=0.141.1",
     "pyjwt>=2.13.0",
     "slowapi>=0.1.10",
