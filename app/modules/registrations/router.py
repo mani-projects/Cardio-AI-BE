@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import verify_internal_api_key
-from app.modules.auth.dependencies import require_admin_or_internal_key, require_roles
+from app.modules.auth.dependencies import get_current_user, require_admin_or_internal_key, require_roles
 from app.modules.courses.service import CourseNotFoundError
 from app.modules.registrations.models import RegistrationStatus
 from app.modules.registrations.schemas import (
@@ -23,6 +23,7 @@ from app.modules.registrations.service import (
     delete_registration,
     get_registration,
     list_registrations,
+    list_user_registrations,
     mark_follow_up_sent,
     mark_registration_expired,
     mark_registration_paid,
@@ -102,6 +103,15 @@ async def list_registrations_endpoint(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/mine", response_model=list[RegistrationRead])
+async def list_my_registrations_endpoint(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[RegistrationRead]:
+    registrations = await list_user_registrations(db, current_user.id)
+    return [RegistrationRead.from_registration(registration) for registration in registrations]
 
 
 @router.get("/{registration_id}", response_model=RegistrationRead)
