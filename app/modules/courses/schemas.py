@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -12,3 +13,31 @@ class CourseRead(BaseModel):
     price_cents: int
     currency: str
     is_active: bool
+
+
+class CourseFacultyRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    course_id: uuid.UUID
+    user_id: uuid.UUID
+    full_name: str
+    email: str
+    assigned_by: uuid.UUID | None
+    created_at: datetime
+
+    @classmethod
+    def from_assignment(cls, assignment) -> "CourseFacultyRead":
+        return cls(
+            id=assignment.id,
+            course_id=assignment.course_id,
+            user_id=assignment.user_id,
+            full_name=assignment.user.full_name,
+            email=assignment.user.email,
+            assigned_by=assignment.assigned_by,
+            created_at=assignment.created_at,
+        )
+
+
+class AssignFacultyRequest(BaseModel):
+    user_id: uuid.UUID
