@@ -8,6 +8,7 @@ from app.modules.case_attempts.models import CaseAttempt, CaseAttemptStatus
 from app.modules.cases.models import Case, CaseStatus
 from app.modules.course_certificates.models import CourseCertificate
 from app.modules.course_lectures.models import CourseLecture, LectureWatchState
+from app.modules.course_resources.models import CourseResource, ResourceViewState
 
 _SUPPORTED_CONTENT_TYPES = {"application/pdf", "image/png", "image/jpeg"}
 _KEY_PREFIX = "course-certificates"
@@ -42,6 +43,9 @@ async def is_course_complete(db: AsyncSession, *, course_id: uuid.UUID, learner_
     lecture_ids = set(
         (await db.execute(select(CourseLecture.id).where(CourseLecture.course_id == course_id))).scalars().all()
     )
+    resource_ids = set(
+        (await db.execute(select(CourseResource.id).where(CourseResource.course_id == course_id))).scalars().all()
+    )
     approved_case_ids = set(
         (
             await db.execute(select(Case.id).where(Case.course_id == course_id, Case.status == CaseStatus.APPROVED))
@@ -50,7 +54,7 @@ async def is_course_complete(db: AsyncSession, *, course_id: uuid.UUID, learner_
         .all()
     )
 
-    if not lecture_ids and not approved_case_ids:
+    if not lecture_ids and not resource_ids and not approved_case_ids:
         return False
 
     if lecture_ids:
@@ -67,6 +71,22 @@ async def is_course_complete(db: AsyncSession, *, course_id: uuid.UUID, learner_
             .all()
         )
         if not lecture_ids <= watched_ids:
+            return False
+
+    if resource_ids:
+        viewed_ids = set(
+            (
+                await db.execute(
+                    select(ResourceViewState.resource_id).where(
+                        ResourceViewState.user_id == learner_id,
+                        ResourceViewState.resource_id.in_(resource_ids),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not resource_ids <= viewed_ids:
             return False
 
     if approved_case_ids:
