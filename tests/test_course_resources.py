@@ -2,8 +2,9 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 
-from app.modules.course_resources.models import ResourceCategory
+from app.modules.course_resources.models import ResourceCategory, ResourceViewState
 from app.modules.course_resources.service import (
     InvalidFileKeyError,
     UnsupportedFileTypeError,
@@ -12,6 +13,7 @@ from app.modules.course_resources.service import (
     delete_resource,
     finalize_resource,
     list_resources_for_course,
+    mark_viewed,
 )
 
 
@@ -120,4 +122,43 @@ async def test_delete_resource_removes_row_even_if_s3_delete_fails(db_session, m
 
     mock_delete.assert_called_once_with(resource.file_key)
     remaining = await list_resources_for_course(db_session, course.id)
+    assert remaining == []
+
+
+async def test_mark_viewed_is_idempotent(db_session, make_course, make_course_resource, make_user):
+    course = await make_course(slug="1")
+    learner = await make_user(email="learner-viewed@example.com")
+    resource = await make_course_resource(course)
+
+    await mark_viewed(db_session, resource_id=resource.id, user_id=learner.id)
+    await mark_viewed(db_session, resource_id=resource.id, user_id=learner.id)
+
+    rows = (
+        (
+            await db_session.execute(
+                select(ResourceViewState).where(
+                    ResourceViewState.resource_id == resource.id, ResourceViewState.user_id == learner.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+
+
+async def test_delete_resource_cascades_view_state(db_session, make_course, make_course_resource, make_user):
+    course = await make_course(slug="1")
+    learner = await make_user(email="learner-viewed2@example.com")
+    resource = await make_course_resource(course)
+    await mark_viewed(db_session, resource_id=resource.id, user_id=learner.id)
+
+    with patch("app.core.storage.delete_object", new=AsyncMock(return_value=None)):
+        await delete_resource(db_session, resource)
+
+    remaining = (
+        (await db_session.execute(select(ResourceViewState).where(ResourceViewState.resource_id == resource.id)))
+        .scalars()
+        .all()
+    )
     assert remaining == []
