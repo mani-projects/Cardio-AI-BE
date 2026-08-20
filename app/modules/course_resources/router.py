@@ -22,6 +22,7 @@ from app.modules.course_resources.service import (
     finalize_resource,
     get_resource,
     list_resources_for_course,
+    mark_viewed,
 )
 from app.modules.auth.dependencies import get_current_user
 from app.modules.courses.dependencies import require_course_faculty
@@ -44,6 +45,24 @@ async def list_course_resources_endpoint(
         CourseResourceRead.from_resource(resource, storage.generate_presigned_get_url(resource.file_key))
         for resource in resources
     ]
+
+
+@learner_router.post("/{course_id}/resources/{resource_id}/view", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_resource_viewed_endpoint(
+    resource_id: uuid.UUID,
+    course: Course = Depends(require_course_registration()),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    try:
+        resource = await get_resource(db, resource_id)
+    except CourseResourceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found") from exc
+    if resource.course_id != course.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+
+    await mark_viewed(db, resource_id=resource.id, user_id=current_user.id)
+    return None
 
 
 @faculty_router.get("/courses/{course_id}/resources", response_model=list[CourseResourceRead])
