@@ -1,10 +1,11 @@
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
-from app.modules.course_resources.models import CourseResource, ResourceCategory
+from app.modules.course_resources.models import CourseResource, ResourceCategory, ResourceViewState
 
 _SUPPORTED_CONTENT_TYPE = "application/pdf"
 _KEY_PREFIX = "course-resources"
@@ -98,4 +99,14 @@ async def list_resources_for_course(
 async def delete_resource(db: AsyncSession, resource: CourseResource) -> None:
     await storage.delete_object(resource.file_key)
     await db.delete(resource)
+    await db.commit()
+
+
+async def mark_viewed(db: AsyncSession, *, resource_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    stmt = (
+        pg_insert(ResourceViewState)
+        .values(resource_id=resource_id, user_id=user_id)
+        .on_conflict_do_nothing(index_elements=["resource_id", "user_id"])
+    )
+    await db.execute(stmt)
     await db.commit()
