@@ -12,7 +12,14 @@ from app.core.database import Base
 
 # import every module's models so they register on Base.metadata before autogenerate runs
 from app.modules.auth import models as auth_models  # noqa: F401
+from app.modules.case_attempts import models as case_attempts_models  # noqa: F401
+from app.modules.case_categories import models as case_categories_models  # noqa: F401
+from app.modules.cases import models as cases_models  # noqa: F401
+from app.modules.course_certificates import models as course_certificates_models  # noqa: F401
+from app.modules.course_lectures import models as course_lectures_models  # noqa: F401
+from app.modules.course_resources import models as course_resources_models  # noqa: F401
 from app.modules.courses import models as courses_models  # noqa: F401
+from app.modules.faculty_applications import models as faculty_applications_models  # noqa: F401
 from app.modules.registrations import models as registrations_models  # noqa: F401
 from app.modules.users import models as users_models  # noqa: F401
 
