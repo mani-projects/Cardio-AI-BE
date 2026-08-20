@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,6 +30,7 @@ class Course(Base):
 
 class CourseFaculty(Base):
     __tablename__ = "course_faculty"
+    __table_args__ = (Index("ix_course_faculty_course_id_user_id", "course_id", "user_id", unique=True),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     course_id: Mapped[uuid.UUID] = mapped_column(
