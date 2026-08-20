@@ -15,7 +15,7 @@ from app.modules.case_categories.models import CaseCategory
 from app.modules.cases.models import Case
 from app.modules.course_certificates.models import CourseCertificate
 from app.modules.course_lectures.models import CourseLecture, LectureSource, LectureWatchState
-from app.modules.course_resources.models import CourseResource, ResourceCategory
+from app.modules.course_resources.models import CourseResource, ResourceCategory, ResourceViewState
 from app.modules.courses.models import Course, CourseFaculty
 from app.modules.faculty_applications.models import FacultyApplication
 from app.modules.registrations.models import Registration, RegistrationStatus
@@ -72,6 +72,7 @@ async def db_session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
             CaseAttempt,
             Case,
             CaseCategory,
+            ResourceViewState,
             CourseResource,
             LectureWatchState,
             CourseLecture,
