@@ -59,6 +59,23 @@ async def test_is_course_complete_lectures_only(db_session, make_course, make_us
     assert await is_course_complete(db_session, course_id=course.id, learner_id=learner.id) is True
 
 
+async def test_is_course_complete_resources_only(db_session, make_course, make_user, make_course_resource):
+    from app.modules.course_resources.service import mark_viewed
+
+    course = await make_course(slug="1")
+    learner = await make_user(email="learner-resources@example.com")
+    resource_a = await make_course_resource(course, title="Resource A")
+    resource_b = await make_course_resource(course, title="Resource B")
+
+    assert await is_course_complete(db_session, course_id=course.id, learner_id=learner.id) is False
+
+    await mark_viewed(db_session, resource_id=resource_a.id, user_id=learner.id)
+    assert await is_course_complete(db_session, course_id=course.id, learner_id=learner.id) is False
+
+    await mark_viewed(db_session, resource_id=resource_b.id, user_id=learner.id)
+    assert await is_course_complete(db_session, course_id=course.id, learner_id=learner.id) is True
+
+
 async def test_is_course_complete_cases_only(
     db_session, make_course, make_user, make_case_category, make_case, make_case_attempt
 ):
@@ -93,21 +110,33 @@ async def test_is_course_complete_ignores_non_approved_cases(
     assert await is_course_complete(db_session, course_id=course.id, learner_id=learner.id) is False
 
 
-async def test_is_course_complete_lectures_and_cases_both_required(
-    db_session, make_course, make_user, make_course_lecture, make_case_category, make_case, make_case_attempt
+async def test_is_course_complete_lectures_resources_and_cases_all_required(
+    db_session,
+    make_course,
+    make_user,
+    make_course_lecture,
+    make_course_resource,
+    make_case_category,
+    make_case,
+    make_case_attempt,
 ):
     from app.modules.course_lectures.service import mark_watched
+    from app.modules.course_resources.service import mark_viewed
 
     course = await make_course(slug="1")
-    learner = await make_user(email="learner-both@example.com")
-    faculty = await make_user(email="faculty-both@example.com")
+    learner = await make_user(email="learner-all@example.com")
+    faculty = await make_user(email="faculty-all@example.com")
     lecture = await make_course_lecture(course)
+    resource = await make_course_resource(course)
     category = await make_case_category(course)
     approved_case = await make_case(course, category, faculty, title="Approved case")
     approved_case.status = CaseStatus.APPROVED
     await db_session.commit()
 
     await mark_watched(db_session, lecture_id=lecture.id, user_id=learner.id)
+    assert await is_course_complete(db_session, course_id=course.id, learner_id=learner.id) is False
+
+    await mark_viewed(db_session, resource_id=resource.id, user_id=learner.id)
     assert await is_course_complete(db_session, course_id=course.id, learner_id=learner.id) is False
 
     attempt = await make_case_attempt(approved_case, learner)
