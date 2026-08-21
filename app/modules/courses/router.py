@@ -7,7 +7,7 @@ from app.core.database import get_db
 from app.modules.auth.dependencies import require_roles
 from app.modules.courses.dependencies import get_course_or_404
 from app.modules.courses.models import Course
-from app.modules.courses.schemas import AssignFacultyRequest, CourseFacultyRead, CourseRead
+from app.modules.courses.schemas import AssignFacultyRequest, CourseFacultyRead, CourseRead, CourseUpdateRequest
 from app.modules.courses.service import (
     CourseFacultyAssignmentNotFoundError,
     CourseNotFoundError,
@@ -20,6 +20,7 @@ from app.modules.courses.service import (
     list_courses,
     list_faculty_courses,
     remove_course_faculty,
+    update_course,
 )
 from app.modules.users.models import User, UserRole
 
@@ -52,6 +53,19 @@ async def get_course_by_slug_endpoint(course_slug: str, db: AsyncSession = Depen
     except CourseNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found") from exc
     return CourseRead.model_validate(course)
+
+
+@router.patch("/{course_id}", response_model=CourseRead)
+async def update_course_endpoint(
+    payload: CourseUpdateRequest,
+    course: Course = Depends(get_course_or_404),
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> CourseRead:
+    updated = await update_course(
+        db, course, title=payload.title, price_cents=payload.price_cents, is_active=payload.is_active
+    )
+    return CourseRead.model_validate(updated)
 
 
 @router.get("/{course_id}/faculty", response_model=list[CourseFacultyRead])
