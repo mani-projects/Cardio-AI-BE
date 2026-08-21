@@ -38,6 +38,10 @@ class User(Base):
     # drives the forced "set your own password" prompt after login. Flipped
     # back to False the moment the user changes it via /auth/change-password.
     is_temporary_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Soft-delete: NULL means active; set to the deletion time when an admin
+    # deletes this account, purged for real after 3 days (service.py's
+    # delete_user/restore_user/purge_deleted_users).
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
