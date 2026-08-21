@@ -58,6 +58,29 @@ async def get_course(db: AsyncSession, course_id: uuid.UUID) -> Course:
     return course
 
 
+async def update_course(
+    db: AsyncSession,
+    course: Course,
+    *,
+    title: str | None = None,
+    price_cents: int | None = None,
+    is_active: bool | None = None,
+) -> Course:
+    # Live: register/actions.py reads this course's price_cents/title at
+    # checkout-session-creation time, so an edit here takes effect on the
+    # very next checkout no separate "publish" step.
+    if title is not None:
+        course.title = title
+    if price_cents is not None:
+        course.price_cents = price_cents
+    if is_active is not None:
+        course.is_active = is_active
+
+    await db.commit()
+    await db.refresh(course)
+    return course
+
+
 async def is_course_faculty(db: AsyncSession, *, course_id: uuid.UUID, user_id: uuid.UUID) -> bool:
     stmt = select(func.count()).select_from(CourseFaculty).where(
         CourseFaculty.course_id == course_id, CourseFaculty.user_id == user_id
