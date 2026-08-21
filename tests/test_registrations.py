@@ -1,15 +1,23 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.registrations.schemas import RegistrationCreateRequest
 from app.modules.registrations.service import (
+    RegistrationIsPaidError,
+    RegistrationNotDeletedError,
     create_pending_registration,
+    delete_registration,
     has_course_access,
+    list_registrations,
     mark_registration_expired,
     mark_registration_paid,
+    purge_deleted_registrations,
+    restore_registration,
 )
 from app.modules.users.models import User
 
@@ -228,3 +236,105 @@ async def test_has_course_access_false_for_different_course(db_session, make_cou
     await make_registration(course_a, user, status=RegistrationStatus.PAID)
 
     assert await has_course_access(db_session, user_id=user.id, course_id=course_b.id) is False
+
+
+# ---------------------------------------------------------------------------
+# delete_registration / restore_registration / purge_deleted_registrations
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_registration_soft_deletes_a_paid_registration(db_session, make_course, make_registration):
+    course = await make_course(slug="1")
+    registration = await make_registration(course, status=RegistrationStatus.PAID)
+
+    await delete_registration(db_session, registration, allow_paid=True)
+
+    await db_session.refresh(registration)
+    assert registration.deleted_at is not None
+    # Still physically present, not gone.
+    assert await db_session.get(Registration, registration.id) is not None
+
+
+async def test_delete_registration_still_blocked_for_paid_without_allow_paid(
+    db_session, make_course, make_registration
+):
+    course = await make_course(slug="1")
+    registration = await make_registration(course, status=RegistrationStatus.PAID)
+
+    with pytest.raises(RegistrationIsPaidError):
+        await delete_registration(db_session, registration, allow_paid=False)
+
+
+async def test_delete_registration_hard_deletes_non_paid_registrations(db_session, make_course, make_registration):
+    course = await make_course(slug="1")
+    registration = await make_registration(course, status=RegistrationStatus.PENDING)
+
+    await delete_registration(db_session, registration)
+
+    assert await db_session.get(Registration, registration.id) is None
+
+
+async def test_restore_registration_clears_deleted_at(db_session, make_course, make_registration):
+    course = await make_course(slug="1")
+    registration = await make_registration(course, status=RegistrationStatus.PAID)
+    await delete_registration(db_session, registration, allow_paid=True)
+
+    restored = await restore_registration(db_session, registration)
+
+    assert restored.deleted_at is None
+
+
+async def test_restore_registration_raises_when_not_deleted(db_session, make_course, make_registration):
+    course = await make_course(slug="1")
+    registration = await make_registration(course, status=RegistrationStatus.PAID)
+
+    with pytest.raises(RegistrationNotDeletedError):
+        await restore_registration(db_session, registration)
+
+
+async def test_purge_deleted_registrations_only_removes_rows_past_the_retention_window(
+    db_session, make_course, make_registration
+):
+    course = await make_course(slug="1")
+    recent = await make_registration(course, status=RegistrationStatus.PAID, email="recent@example.com")
+    old = await make_registration(course, status=RegistrationStatus.PAID, email="old@example.com")
+
+    await delete_registration(db_session, recent, allow_paid=True)
+    await delete_registration(db_session, old, allow_paid=True)
+    old.deleted_at = datetime.now(timezone.utc) - timedelta(days=4)
+    await db_session.commit()
+
+    purged_count = await purge_deleted_registrations(db_session)
+
+    assert purged_count == 1
+    assert await db_session.get(Registration, old.id) is None
+    assert await db_session.get(Registration, recent.id) is not None
+
+
+async def test_list_registrations_excludes_deleted_by_default(db_session, make_course, make_registration):
+    course = await make_course(slug="1")
+    active = await make_registration(course, status=RegistrationStatus.PAID, email="active@example.com")
+    deleted = await make_registration(course, status=RegistrationStatus.PAID, email="deleted@example.com")
+    await delete_registration(db_session, deleted, allow_paid=True)
+
+    items, total = await list_registrations(db_session, status=RegistrationStatus.PAID)
+
+    assert total == 1
+    assert [item.id for item in items] == [active.id]
+
+
+async def test_list_registrations_include_deleted_merges_expired_and_deleted(
+    db_session, make_course, make_registration
+):
+    course = await make_course(slug="1")
+    expired = await make_registration(course, status=RegistrationStatus.EXPIRED, email="expired@example.com")
+    deleted = await make_registration(course, status=RegistrationStatus.PAID, email="deleted@example.com")
+    active_paid = await make_registration(course, status=RegistrationStatus.PAID, email="active@example.com")
+    await delete_registration(db_session, deleted, allow_paid=True)
+
+    items, total = await list_registrations(db_session, include_deleted=True)
+
+    ids = {item.id for item in items}
+    assert total == 2
+    assert ids == {expired.id, deleted.id}
+    assert active_paid.id not in ids
