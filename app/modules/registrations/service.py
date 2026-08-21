@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,15 @@ class RegistrationNotFoundError(RegistrationError):
 
 class RegistrationIsPaidError(RegistrationError):
     pass
+
+
+class RegistrationNotDeletedError(RegistrationError):
+    pass
+
+
+# Recovery window between a soft-delete and the purge job actually removing
+# the row see delete_registration/restore_registration/purge_deleted_registrations.
+DELETED_RETENTION = timedelta(days=3)
 
 
 def _fields_from_payload(payload: RegistrationCreateRequest) -> dict:
@@ -238,8 +247,35 @@ async def delete_registration(db: AsyncSession, registration: Registration, *, a
     # paid record" confirmation, never as a default.
     if registration.status == RegistrationStatus.PAID and not allow_paid:
         raise RegistrationIsPaidError(registration.id)
+
+    if registration.status == RegistrationStatus.PAID:
+        # Recoverable for DELETED_RETENTION instead of gone immediately — a
+        # paid record deserves a safety net even after the admin confirms.
+        registration.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
+        return
+
     await db.delete(registration)
     await db.commit()
+
+
+async def restore_registration(db: AsyncSession, registration: Registration) -> Registration:
+    if registration.deleted_at is None:
+        raise RegistrationNotDeletedError(registration.id)
+    registration.deleted_at = None
+    await db.commit()
+    await db.refresh(registration)
+    return registration
+
+
+async def purge_deleted_registrations(db: AsyncSession) -> int:
+    cutoff = datetime.now(timezone.utc) - DELETED_RETENTION
+    stmt = select(Registration).where(Registration.deleted_at.is_not(None), Registration.deleted_at < cutoff)
+    expired = list((await db.execute(stmt)).scalars().all())
+    for registration in expired:
+        await db.delete(registration)
+    await db.commit()
+    return len(expired)
 
 
 async def list_user_registrations(db: AsyncSession, user_id: uuid.UUID) -> list[Registration]:
@@ -265,6 +301,7 @@ async def list_registrations(
     q: str | None = None,
     page: int = 1,
     page_size: int = 20,
+    include_deleted: bool = False,
 ) -> tuple[list[Registration], int]:
     stmt = select(Registration)
     count_stmt = select(func.count()).select_from(Registration)
@@ -272,9 +309,24 @@ async def list_registrations(
     if course_id is not None:
         stmt = stmt.where(Registration.course_id == course_id)
         count_stmt = count_stmt.where(Registration.course_id == course_id)
-    if status is not None:
-        stmt = stmt.where(Registration.status == status)
-        count_stmt = count_stmt.where(Registration.status == status)
+
+    if include_deleted:
+        # The one merged "Expired/Deleted" admin view a soft-deleted paid
+        # registration's `status` column still literally reads PAID (deleted_at
+        # is an orthogonal flag), so it can't be reached via the normal status
+        # filter above; `status` itself is ignored in this mode since a single
+        # selector can't mean both "only expired" and "show this OR'd bucket".
+        deleted_clause = or_(Registration.status == RegistrationStatus.EXPIRED, Registration.deleted_at.is_not(None))
+        stmt = stmt.where(deleted_clause)
+        count_stmt = count_stmt.where(deleted_clause)
+    else:
+        # Every other view: a soft-deleted row never leaks into a normal
+        # status-filtered (or unfiltered) listing.
+        stmt = stmt.where(Registration.deleted_at.is_(None))
+        count_stmt = count_stmt.where(Registration.deleted_at.is_(None))
+        if status is not None:
+            stmt = stmt.where(Registration.status == status)
+            count_stmt = count_stmt.where(Registration.status == status)
     if q:
         like = f"%{q}%"
         search_clause = (Registration.email.ilike(like)) | (Registration.full_name.ilike(like))
