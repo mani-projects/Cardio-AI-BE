@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CourseRead(BaseModel):
@@ -41,3 +41,9 @@ class CourseFacultyRead(BaseModel):
 
 class AssignFacultyRequest(BaseModel):
     user_id: uuid.UUID
+
+
+class CourseUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    price_cents: int | None = Field(default=None, ge=0)
+    is_active: bool | None = None
