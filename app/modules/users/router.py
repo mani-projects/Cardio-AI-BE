@@ -4,6 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.security import verify_internal_api_key
 from app.modules.auth.dependencies import require_roles
 from app.modules.auth.service import ResetTokenCooldownError, ResetTokenRateLimitedError
 from app.modules.courses.service import CourseNotFoundError
@@ -22,12 +23,15 @@ from app.modules.users.service import (
     EmailAlreadyExistsError,
     UserAlreadyClaimedError,
     UserNotClaimedError,
+    UserNotDeletedError,
     UserNotFoundError,
     admin_reset_password,
     create_user,
     delete_user,
     get_user,
     list_users,
+    purge_deleted_users,
+    restore_user,
     send_claim_email,
     send_reset_email,
     update_user,
@@ -40,6 +44,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 async def list_users_endpoint(
     role: UserRole | None = Query(None),
     is_email_verified: bool | None = Query(None),
+    deleted: bool = Query(False),
     q: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -47,7 +52,7 @@ async def list_users_endpoint(
     _admin: User = Depends(require_roles(UserRole.ADMIN)),
 ) -> PaginatedUsers:
     items, total = await list_users(
-        db, role=role, is_email_verified=is_email_verified, q=q, page=page, page_size=page_size
+        db, role=role, is_email_verified=is_email_verified, deleted=deleted, q=q, page=page, page_size=page_size
     )
     return PaginatedUsers(
         items=[UserAdminRead.from_user(user) for user in items], total=total, page=page, page_size=page_size
@@ -184,6 +189,33 @@ async def delete_user_endpoint(
 
     await delete_user(db, user)
     return None
+
+
+@router.post("/{user_id}/restore", response_model=UserAdminRead)
+async def restore_user_endpoint(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> UserAdminRead:
+    try:
+        user = await get_user(db, user_id)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
+
+    try:
+        user = await restore_user(db, user)
+    except UserNotDeletedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This user isn't deleted.") from exc
+    return UserAdminRead.from_user(user)
+
+
+@router.post("/purge-deleted", status_code=status.HTTP_200_OK)
+async def purge_deleted_users_endpoint(
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_internal_api_key),
+) -> dict[str, int]:
+    purged = await purge_deleted_users(db)
+    return {"purged": purged}
 
 
 @router.post("/{user_id}/reset-password", response_model=GeneratedPasswordResponse)
