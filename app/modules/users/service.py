@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import BackgroundTasks
 from sqlalchemy import func, select
@@ -38,6 +39,15 @@ class EmailAlreadyExistsError(UserError):
     pass
 
 
+class UserNotDeletedError(UserError):
+    pass
+
+
+# Recovery window between a soft-delete and the purge job actually removing
+# the row see delete_user/restore_user/purge_deleted_users.
+DELETED_RETENTION = timedelta(days=3)
+
+
 async def get_user(db: AsyncSession, user_id: uuid.UUID) -> User:
     user = await db.get(User, user_id)
     if user is None:
@@ -50,12 +60,20 @@ async def list_users(
     *,
     role: UserRole | None = None,
     is_email_verified: bool | None = None,
+    deleted: bool = False,
     q: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[User], int]:
     stmt = select(User)
     count_stmt = select(func.count()).select_from(User)
+
+    # Independent of role/verified — a deleted row's other columns are
+    # untouched, so this just flips which bucket (active vs. soft-deleted)
+    # the rest of the filters apply within.
+    deleted_clause = User.deleted_at.is_not(None) if deleted else User.deleted_at.is_(None)
+    stmt = stmt.where(deleted_clause)
+    count_stmt = count_stmt.where(deleted_clause)
 
     if role is not None:
         stmt = stmt.where(User.role == role)
@@ -159,8 +177,30 @@ async def update_user(
 
 
 async def delete_user(db: AsyncSession, user: User) -> None:
-    await db.delete(user)
+    # Soft-delete, recoverable for DELETED_RETENTION the row still exists
+    # during the window, so registrations.user_id (ON DELETE SET NULL) is
+    # untouched until the purge job actually removes it for real.
+    user.deleted_at = datetime.now(timezone.utc)
     await db.commit()
+
+
+async def restore_user(db: AsyncSession, user: User) -> User:
+    if user.deleted_at is None:
+        raise UserNotDeletedError(user.id)
+    user.deleted_at = None
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def purge_deleted_users(db: AsyncSession) -> int:
+    cutoff = datetime.now(timezone.utc) - DELETED_RETENTION
+    stmt = select(User).where(User.deleted_at.is_not(None), User.deleted_at < cutoff)
+    expired = list((await db.execute(stmt)).scalars().all())
+    for user in expired:
+        await db.delete(user)
+    await db.commit()
+    return len(expired)
 
 
 async def admin_reset_password(db: AsyncSession, user: User) -> str:
