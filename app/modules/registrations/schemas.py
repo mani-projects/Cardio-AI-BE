@@ -57,6 +57,7 @@ class RegistrationRead(BaseModel):
     attendance: str | None
     follow_up_sent_at: datetime | None
     paid_at: datetime | None
+    deleted_at: datetime | None
     created_at: datetime
 
     @classmethod
@@ -83,6 +84,7 @@ class RegistrationRead(BaseModel):
             attendance=registration.attendance,
             follow_up_sent_at=registration.follow_up_sent_at,
             paid_at=registration.paid_at,
+            deleted_at=registration.deleted_at,
             created_at=registration.created_at,
         )
 
