@@ -31,6 +31,7 @@ class UserAdminRead(BaseModel):
     is_active: bool
     is_email_verified: bool
     created_at: datetime
+    deleted_at: datetime | None
     # Whether this account has a usable password: a real signup, or a
     # pre-provisioned (payment-only) account someone has since claimed.
     account_claimed: bool
@@ -46,6 +47,7 @@ class UserAdminRead(BaseModel):
             is_active=user.is_active,
             is_email_verified=user.is_email_verified,
             created_at=user.created_at,
+            deleted_at=user.deleted_at,
             account_claimed=user.hashed_password is not None,
             is_temporary_password=user.is_temporary_password,
         )
