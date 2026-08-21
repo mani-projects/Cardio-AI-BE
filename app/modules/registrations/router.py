@@ -18,6 +18,7 @@ from app.modules.registrations.schemas import (
 )
 from app.modules.registrations.service import (
     RegistrationIsPaidError,
+    RegistrationNotDeletedError,
     RegistrationNotFoundError,
     create_pending_registration,
     delete_registration,
@@ -27,6 +28,8 @@ from app.modules.registrations.service import (
     mark_follow_up_sent,
     mark_registration_expired,
     mark_registration_paid,
+    purge_deleted_registrations,
+    restore_registration,
 )
 from app.modules.users.models import User, UserRole
 
@@ -88,6 +91,7 @@ async def mark_follow_up_sent_endpoint(
 async def list_registrations_endpoint(
     course_id: uuid.UUID | None = Query(None),
     status_filter: RegistrationStatus | None = Query(None, alias="status"),
+    include_deleted: bool = Query(False),
     q: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -95,7 +99,13 @@ async def list_registrations_endpoint(
     _: None = Depends(require_admin_or_internal_key),
 ) -> PaginatedRegistrations:
     items, total = await list_registrations(
-        db, course_id=course_id, status=status_filter, q=q, page=page, page_size=page_size
+        db,
+        course_id=course_id,
+        status=status_filter,
+        q=q,
+        page=page,
+        page_size=page_size,
+        include_deleted=include_deleted,
     )
     return PaginatedRegistrations(
         items=[RegistrationRead.from_registration(item) for item in items],
@@ -147,3 +157,30 @@ async def delete_registration_endpoint(
             detail="Paid registrations can't be deleted — they're a financial record.",
         ) from exc
     return None
+
+
+@router.post("/{registration_id}/restore", response_model=RegistrationRead)
+async def restore_registration_endpoint(
+    registration_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> RegistrationRead:
+    try:
+        registration = await get_registration(db, registration_id)
+    except RegistrationNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found") from exc
+
+    try:
+        registration = await restore_registration(db, registration)
+    except RegistrationNotDeletedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This registration isn't deleted.") from exc
+    return RegistrationRead.from_registration(registration)
+
+
+@router.post("/purge-deleted", status_code=status.HTTP_200_OK)
+async def purge_deleted_registrations_endpoint(
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_internal_api_key),
+) -> dict[str, int]:
+    purged = await purge_deleted_registrations(db)
+    return {"purged": purged}
