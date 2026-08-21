@@ -68,7 +68,7 @@ async def list_users(
     stmt = select(User)
     count_stmt = select(func.count()).select_from(User)
 
-    # Independent of role/verified — a deleted row's other columns are
+    # Independent of role/verified: a deleted row's other columns are
     # untouched, so this just flips which bucket (active vs. soft-deleted)
     # the rest of the filters apply within.
     deleted_clause = User.deleted_at.is_not(None) if deleted else User.deleted_at.is_(None)

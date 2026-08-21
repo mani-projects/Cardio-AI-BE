@@ -249,7 +249,7 @@ async def delete_registration(db: AsyncSession, registration: Registration, *, a
         raise RegistrationIsPaidError(registration.id)
 
     if registration.status == RegistrationStatus.PAID:
-        # Recoverable for DELETED_RETENTION instead of gone immediately — a
+        # Recoverable for DELETED_RETENTION instead of gone immediately: a
         # paid record deserves a safety net even after the admin confirms.
         registration.deleted_at = datetime.now(timezone.utc)
         await db.commit()
