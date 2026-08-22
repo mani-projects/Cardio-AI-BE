@@ -15,6 +15,8 @@ from app.modules.registrations.schemas import (
     RegistrationCreateRequest,
     RegistrationPaidResponse,
     RegistrationRead,
+    RegistrationStatusCounts,
+    RegistrationStatusUpdateRequest,
 )
 from app.modules.registrations.service import (
     RegistrationIsPaidError,
@@ -23,6 +25,7 @@ from app.modules.registrations.service import (
     create_pending_registration,
     delete_registration,
     get_registration,
+    get_registration_status_counts,
     list_registrations,
     list_user_registrations,
     mark_follow_up_sent,
@@ -30,6 +33,7 @@ from app.modules.registrations.service import (
     mark_registration_paid,
     purge_deleted_registrations,
     restore_registration,
+    update_registration_status,
 )
 from app.modules.users.models import User, UserRole
 
@@ -115,6 +119,20 @@ async def list_registrations_endpoint(
     )
 
 
+@router.get("/stats", response_model=RegistrationStatusCounts)
+async def get_registration_status_counts_endpoint(
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> RegistrationStatusCounts:
+    counts = await get_registration_status_counts(db)
+    return RegistrationStatusCounts(
+        pending=counts[RegistrationStatus.PENDING],
+        paid=counts[RegistrationStatus.PAID],
+        free=counts[RegistrationStatus.FREE],
+        expired=counts[RegistrationStatus.EXPIRED],
+    )
+
+
 @router.get("/mine", response_model=list[RegistrationRead])
 async def list_my_registrations_endpoint(
     db: AsyncSession = Depends(get_db),
@@ -174,6 +192,22 @@ async def restore_registration_endpoint(
         registration = await restore_registration(db, registration)
     except RegistrationNotDeletedError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This registration isn't deleted.") from exc
+    return RegistrationRead.from_registration(registration)
+
+
+@router.patch("/{registration_id}/status", response_model=RegistrationRead)
+async def update_registration_status_endpoint(
+    registration_id: uuid.UUID,
+    payload: RegistrationStatusUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> RegistrationRead:
+    try:
+        registration = await get_registration(db, registration_id)
+    except RegistrationNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found") from exc
+
+    registration = await update_registration_status(db, registration, payload.status)
     return RegistrationRead.from_registration(registration)
 
 
