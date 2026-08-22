@@ -14,10 +14,12 @@ from app.modules.registrations.service import (
     delete_registration,
     has_course_access,
     list_registrations,
+    get_registration_status_counts,
     mark_registration_expired,
     mark_registration_paid,
     purge_deleted_registrations,
     restore_registration,
+    update_registration_status,
 )
 from app.modules.users.models import User
 
@@ -67,6 +69,18 @@ async def test_create_pending_registration_is_idempotent_on_retry(db_session, ma
     assert await _count_registrations(db_session, payload.stripe_session_id) == 1
 
 
+async def test_create_pending_registration_leaves_a_free_registration_alone(
+    db_session, make_course, make_registration
+):
+    course = await make_course(slug="1")
+    free = await make_registration(course, status=RegistrationStatus.FREE, email="freeuser@example.com")
+
+    result = await create_pending_registration(db_session, _payload(email="freeuser@example.com"))
+
+    assert result.id == free.id
+    assert result.status == RegistrationStatus.FREE
+
+
 # ---------------------------------------------------------------------------
 # mark_registration_paid: the core idempotency + user-linking behavior
 # ---------------------------------------------------------------------------
@@ -90,6 +104,15 @@ async def test_mark_registration_paid_transitions_pending_to_paid_and_provisions
     assert user is not None
     assert user.email == "newpayer@example.com"
     assert user.hashed_password is None  # pre-provisioned, not yet claimed
+
+
+async def test_mark_registration_paid_persists_coupon_code(db_session, make_course):
+    await make_course(slug="1")
+    payload = _payload(email="coupon@example.com", coupon_code="SAVE20")
+
+    registration, *_ = await mark_registration_paid(db_session, payload)
+
+    assert registration.coupon_code == "SAVE20"
 
 
 async def test_mark_registration_paid_with_no_prior_pending_row_still_works(db_session, make_course):
@@ -290,6 +313,58 @@ async def test_restore_registration_raises_when_not_deleted(db_session, make_cou
 
     with pytest.raises(RegistrationNotDeletedError):
         await restore_registration(db_session, registration)
+
+
+async def test_update_registration_status_flips_status_without_touching_existing_user(
+    db_session, make_course, make_user, make_registration
+):
+    course = await make_course(slug="1")
+    user = await make_user()
+    registration = await make_registration(course, user, status=RegistrationStatus.PAID)
+
+    updated = await update_registration_status(db_session, registration, RegistrationStatus.FREE)
+
+    assert updated.status == RegistrationStatus.FREE
+    assert updated.user_id == user.id
+
+
+async def test_update_registration_status_provisions_a_user_when_missing(db_session, make_course, make_registration):
+    course = await make_course(slug="1")
+    registration = await make_registration(
+        course, status=RegistrationStatus.PENDING, email="overridden@example.com"
+    )
+    assert registration.user_id is None
+
+    updated = await update_registration_status(db_session, registration, RegistrationStatus.FREE)
+
+    assert updated.status == RegistrationStatus.FREE
+    assert updated.user_id is not None
+    assert updated.paid_at is not None
+
+    user = await db_session.get(User, updated.user_id)
+    assert user is not None
+    assert user.email == "overridden@example.com"
+
+
+async def test_get_registration_status_counts_excludes_soft_deleted_rows(
+    db_session, make_course, make_registration
+):
+    course = await make_course(slug="1")
+    await make_registration(course, status=RegistrationStatus.PAID, email="a@example.com")
+    await make_registration(course, status=RegistrationStatus.PAID, email="b@example.com")
+    await make_registration(course, status=RegistrationStatus.FREE, email="c@example.com")
+    await make_registration(course, status=RegistrationStatus.PENDING, email="d@example.com")
+    deleted = await make_registration(course, status=RegistrationStatus.PAID, email="e@example.com")
+    await delete_registration(db_session, deleted, allow_paid=True)
+
+    counts = await get_registration_status_counts(db_session)
+
+    assert counts == {
+        RegistrationStatus.PENDING: 1,
+        RegistrationStatus.PAID: 2,
+        RegistrationStatus.FREE: 1,
+        RegistrationStatus.EXPIRED: 0,
+    }
 
 
 async def test_purge_deleted_registrations_only_removes_rows_past_the_retention_window(
