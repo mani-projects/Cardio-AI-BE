@@ -31,6 +31,8 @@ class RegistrationCreateRequest(BaseModel):
     physician_type: str | None = Field(default=None, max_length=100)
     attendance: str | None = Field(default=None, max_length=100)
     coupon_code: str | None = Field(default=None, max_length=255)
+    amount_paid_cents: int | None = None
+    discount_percent: int | None = None
 
 
 class RegistrationRead(BaseModel):
@@ -57,6 +59,8 @@ class RegistrationRead(BaseModel):
     physician_type: str | None
     attendance: str | None
     coupon_code: str | None
+    amount_paid_cents: int | None
+    discount_percent: int | None
     follow_up_sent_at: datetime | None
     paid_at: datetime | None
     deleted_at: datetime | None
@@ -85,6 +89,8 @@ class RegistrationRead(BaseModel):
             physician_type=registration.physician_type,
             attendance=registration.attendance,
             coupon_code=registration.coupon_code,
+            amount_paid_cents=registration.amount_paid_cents,
+            discount_percent=registration.discount_percent,
             follow_up_sent_at=registration.follow_up_sent_at,
             paid_at=registration.paid_at,
             deleted_at=registration.deleted_at,
@@ -114,6 +120,12 @@ class FollowUpSentRequest(BaseModel):
 
 class RegistrationStatusUpdateRequest(BaseModel):
     status: RegistrationStatus
+    # Only set when the caller found real Stripe data to backfill (see the
+    # admin "backfill coupons from Stripe" action) — omitted/None leaves the
+    # existing value untouched.
+    coupon_code: str | None = Field(default=None, max_length=255)
+    amount_paid_cents: int | None = None
+    discount_percent: int | None = None
 
 
 class PaginatedRegistrations(BaseModel):
@@ -123,8 +135,17 @@ class PaginatedRegistrations(BaseModel):
     page_size: int
 
 
-class RegistrationStatusCounts(BaseModel):
+class CourseIncome(BaseModel):
+    course_slug: str
+    course_title: str
+    income_cents: int
+    count: int
+
+
+class RegistrationAnalytics(BaseModel):
     pending: int
     paid: int
     free: int
     expired: int
+    total_income_cents: int
+    income_by_course: list[CourseIncome]
