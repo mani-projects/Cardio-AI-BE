@@ -66,6 +66,10 @@ class Registration(Base):
     # Level II only — null for Level 1 / 1.5 registrations.
     physician_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     attendance: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Promo/coupon code applied at Stripe Checkout, if any (see
+    # register/stripe.ts's getAppliedCouponCode) — null for uncouponed and
+    # pre-existing registrations captured before this column existed.
+    coupon_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     follow_up_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
