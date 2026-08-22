@@ -14,7 +14,7 @@ from app.modules.registrations.service import (
     delete_registration,
     has_course_access,
     list_registrations,
-    get_registration_status_counts,
+    get_registration_analytics,
     mark_registration_expired,
     mark_registration_paid,
     purge_deleted_registrations,
@@ -346,7 +346,41 @@ async def test_update_registration_status_provisions_a_user_when_missing(db_sess
     assert user.email == "overridden@example.com"
 
 
-async def test_get_registration_status_counts_excludes_soft_deleted_rows(
+async def test_update_registration_status_backfills_coupon_code(db_session, make_course, make_user, make_registration):
+    course = await make_course(slug="1")
+    user = await make_user()
+    registration = await make_registration(course, user, status=RegistrationStatus.PAID)
+
+    updated = await update_registration_status(
+        db_session, registration, RegistrationStatus.FREE, coupon_code="SAVE100"
+    )
+
+    assert updated.status == RegistrationStatus.FREE
+    assert updated.coupon_code == "SAVE100"
+
+
+async def test_update_registration_status_backfills_amount_and_discount(
+    db_session, make_course, make_user, make_registration
+):
+    course = await make_course(slug="1")
+    user = await make_user()
+    registration = await make_registration(course, user, status=RegistrationStatus.PAID)
+
+    updated = await update_registration_status(
+        db_session,
+        registration,
+        RegistrationStatus.PAID,
+        coupon_code="HEARTHEALTH50",
+        amount_paid_cents=12500,
+        discount_percent=50,
+    )
+
+    assert updated.coupon_code == "HEARTHEALTH50"
+    assert updated.amount_paid_cents == 12500
+    assert updated.discount_percent == 50
+
+
+async def test_get_registration_analytics_excludes_soft_deleted_rows(
     db_session, make_course, make_registration
 ):
     course = await make_course(slug="1")
@@ -357,14 +391,35 @@ async def test_get_registration_status_counts_excludes_soft_deleted_rows(
     deleted = await make_registration(course, status=RegistrationStatus.PAID, email="e@example.com")
     await delete_registration(db_session, deleted, allow_paid=True)
 
-    counts = await get_registration_status_counts(db_session)
+    analytics = await get_registration_analytics(db_session)
 
-    assert counts == {
-        RegistrationStatus.PENDING: 1,
-        RegistrationStatus.PAID: 2,
-        RegistrationStatus.FREE: 1,
-        RegistrationStatus.EXPIRED: 0,
-    }
+    assert analytics["pending"] == 1
+    assert analytics["paid"] == 2
+    assert analytics["free"] == 1
+    assert analytics["expired"] == 0
+
+
+async def test_get_registration_analytics_sums_income_by_course(db_session, make_course, make_registration):
+    course_one = await make_course(slug="1")
+    course_two = await make_course(slug="2")
+    paid_a = await make_registration(course_one, status=RegistrationStatus.PAID, email="income-a@example.com")
+    paid_a.amount_paid_cents = 25000
+    paid_b = await make_registration(course_one, status=RegistrationStatus.PAID, email="income-b@example.com")
+    paid_b.amount_paid_cents = 12500
+    paid_c = await make_registration(course_two, status=RegistrationStatus.PAID, email="income-c@example.com")
+    paid_c.amount_paid_cents = 190000
+    # Never actually paid — must not count toward income even though it's not deleted.
+    await make_registration(course_one, status=RegistrationStatus.PENDING, email="income-d@example.com")
+    await db_session.commit()
+
+    analytics = await get_registration_analytics(db_session)
+
+    assert analytics["total_income_cents"] == 227500
+    by_slug = {row["course_slug"]: row for row in analytics["income_by_course"]}
+    assert by_slug["1"]["income_cents"] == 37500
+    assert by_slug["1"]["count"] == 2
+    assert by_slug["2"]["income_cents"] == 190000
+    assert by_slug["2"]["count"] == 1
 
 
 async def test_purge_deleted_registrations_only_removes_rows_past_the_retention_window(
