@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.service import find_or_create_user_for_registration, issue_claim_token
+from app.modules.courses.models import Course
 from app.modules.courses.service import get_course_by_slug
 from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.registrations.schemas import RegistrationCreateRequest
@@ -48,6 +49,8 @@ def _fields_from_payload(payload: RegistrationCreateRequest) -> dict:
         physician_type=payload.physician_type,
         attendance=payload.attendance,
         coupon_code=payload.coupon_code,
+        amount_paid_cents=payload.amount_paid_cents,
+        discount_percent=payload.discount_percent,
     )
 
 
@@ -262,7 +265,13 @@ async def delete_registration(db: AsyncSession, registration: Registration, *, a
 
 
 async def update_registration_status(
-    db: AsyncSession, registration: Registration, status: RegistrationStatus
+    db: AsyncSession,
+    registration: Registration,
+    status: RegistrationStatus,
+    *,
+    coupon_code: str | None = None,
+    amount_paid_cents: int | None = None,
+    discount_percent: int | None = None,
 ) -> Registration:
     """Admin-only manual status override.
 
@@ -273,6 +282,11 @@ async def update_registration_status(
     /expired row (no user_id yet) straight to PAID/FREE, where skipping user
     provisioning would silently produce a row that looks paid but has no
     login.
+
+    coupon_code/amount_paid_cents/discount_percent are optional and
+    independent of the status change — they back the admin's one-time
+    "backfill coupons from Stripe" action, which also uses this same call to
+    flip a $0-charged PAID row to FREE.
     """
     if registration.user_id is None and status in (RegistrationStatus.PAID, RegistrationStatus.FREE):
         user, _claim_required = await find_or_create_user_for_registration(
@@ -281,6 +295,13 @@ async def update_registration_status(
         registration.user_id = user.id if user is not None else None
         if registration.paid_at is None:
             registration.paid_at = datetime.now(timezone.utc)
+
+    if coupon_code is not None:
+        registration.coupon_code = coupon_code
+    if amount_paid_cents is not None:
+        registration.amount_paid_cents = amount_paid_cents
+    if discount_percent is not None:
+        registration.discount_percent = discount_percent
 
     registration.status = status
     await db.commit()
@@ -322,19 +343,52 @@ async def has_course_access(db: AsyncSession, *, user_id: uuid.UUID, course_id: 
     return (await db.execute(stmt)).scalar_one() > 0
 
 
-async def get_registration_status_counts(db: AsyncSession) -> dict[RegistrationStatus, int]:
+async def get_registration_analytics(db: AsyncSession) -> dict:
     # Same deleted_at IS NULL convention as list_registrations' default (non
     # include_deleted) view soft-deleted rows don't count toward any status.
-    stmt = (
+    status_stmt = (
         select(Registration.status, func.count())
         .where(Registration.deleted_at.is_(None))
         .group_by(Registration.status)
     )
-    rows = (await db.execute(stmt)).all()
+    rows = (await db.execute(status_stmt)).all()
     counts = {status: 0 for status in RegistrationStatus}
     for status, count in rows:
         counts[status] = count
-    return counts
+
+    # Real money collected only status=PAID counts — the backfill also
+    # writes amount_paid_cents onto pending/expired rows (the amount their
+    # abandoned session would have charged), which must not count as income.
+    income_stmt = (
+        select(
+            Course.slug,
+            Course.title,
+            func.coalesce(func.sum(Registration.amount_paid_cents), 0),
+            func.count(),
+        )
+        .join(Course, Registration.course_id == Course.id)
+        .where(
+            Registration.deleted_at.is_(None),
+            Registration.status == RegistrationStatus.PAID,
+            Registration.amount_paid_cents.is_not(None),
+        )
+        .group_by(Course.slug, Course.title)
+    )
+    income_rows = (await db.execute(income_stmt)).all()
+    income_by_course = [
+        {"course_slug": slug, "course_title": title, "income_cents": income, "count": count}
+        for slug, title, income, count in income_rows
+    ]
+    total_income_cents = sum(row["income_cents"] for row in income_by_course)
+
+    return {
+        "pending": counts[RegistrationStatus.PENDING],
+        "paid": counts[RegistrationStatus.PAID],
+        "free": counts[RegistrationStatus.FREE],
+        "expired": counts[RegistrationStatus.EXPIRED],
+        "total_income_cents": total_income_cents,
+        "income_by_course": income_by_course,
+    }
 
 
 async def list_registrations(
