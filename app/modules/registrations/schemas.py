@@ -30,6 +30,7 @@ class RegistrationCreateRequest(BaseModel):
     notes: str = ""
     physician_type: str | None = Field(default=None, max_length=100)
     attendance: str | None = Field(default=None, max_length=100)
+    coupon_code: str | None = Field(default=None, max_length=255)
 
 
 class RegistrationRead(BaseModel):
@@ -55,6 +56,7 @@ class RegistrationRead(BaseModel):
     notes: str
     physician_type: str | None
     attendance: str | None
+    coupon_code: str | None
     follow_up_sent_at: datetime | None
     paid_at: datetime | None
     deleted_at: datetime | None
@@ -82,6 +84,7 @@ class RegistrationRead(BaseModel):
             notes=registration.notes,
             physician_type=registration.physician_type,
             attendance=registration.attendance,
+            coupon_code=registration.coupon_code,
             follow_up_sent_at=registration.follow_up_sent_at,
             paid_at=registration.paid_at,
             deleted_at=registration.deleted_at,
@@ -109,8 +112,19 @@ class FollowUpSentRequest(BaseModel):
     stripe_session_id: str = Field(min_length=1, max_length=255)
 
 
+class RegistrationStatusUpdateRequest(BaseModel):
+    status: RegistrationStatus
+
+
 class PaginatedRegistrations(BaseModel):
     items: list[RegistrationRead]
     total: int
     page: int
     page_size: int
+
+
+class RegistrationStatusCounts(BaseModel):
+    pending: int
+    paid: int
+    free: int
+    expired: int
