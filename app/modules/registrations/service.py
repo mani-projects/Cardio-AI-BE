@@ -47,6 +47,7 @@ def _fields_from_payload(payload: RegistrationCreateRequest) -> dict:
         notes=payload.notes,
         physician_type=payload.physician_type,
         attendance=payload.attendance,
+        coupon_code=payload.coupon_code,
     )
 
 
@@ -94,9 +95,10 @@ async def create_pending_registration(db: AsyncSession, payload: RegistrationCre
     existing = await _get_by_course_and_email(db, course.id, payload.email, for_update=True)
 
     if existing is not None:
-        if existing.status == RegistrationStatus.PAID:
-            # Already paid for this course — leave the paid record alone
-            # rather than reviving/duplicating it for a stray resubmission.
+        if existing.status in (RegistrationStatus.PAID, RegistrationStatus.FREE):
+            # Already paid (or admin-granted free) for this course — leave the
+            # record alone rather than reviving/duplicating it for a stray
+            # resubmission.
             return existing
 
         for key, value in _fields_from_payload(payload).items():
@@ -259,6 +261,33 @@ async def delete_registration(db: AsyncSession, registration: Registration, *, a
     await db.commit()
 
 
+async def update_registration_status(
+    db: AsyncSession, registration: Registration, status: RegistrationStatus
+) -> Registration:
+    """Admin-only manual status override.
+
+    Deliberately does not re-run mark_registration_paid's user-provisioning
+    logic for the common case — a record already routed through checkout
+    already has user_id/paid_at set correctly, so this is just a corrective
+    flip. The one edge case handled explicitly is overriding a still-pending
+    /expired row (no user_id yet) straight to PAID/FREE, where skipping user
+    provisioning would silently produce a row that looks paid but has no
+    login.
+    """
+    if registration.user_id is None and status in (RegistrationStatus.PAID, RegistrationStatus.FREE):
+        user, _claim_required = await find_or_create_user_for_registration(
+            db, registration.email, registration.full_name
+        )
+        registration.user_id = user.id if user is not None else None
+        if registration.paid_at is None:
+            registration.paid_at = datetime.now(timezone.utc)
+
+    registration.status = status
+    await db.commit()
+    await db.refresh(registration)
+    return registration
+
+
 async def restore_registration(db: AsyncSession, registration: Registration) -> Registration:
     if registration.deleted_at is None:
         raise RegistrationNotDeletedError(registration.id)
@@ -291,6 +320,21 @@ async def has_course_access(db: AsyncSession, *, user_id: uuid.UUID, course_id: 
         Registration.status.in_([RegistrationStatus.PAID, RegistrationStatus.FREE]),
     )
     return (await db.execute(stmt)).scalar_one() > 0
+
+
+async def get_registration_status_counts(db: AsyncSession) -> dict[RegistrationStatus, int]:
+    # Same deleted_at IS NULL convention as list_registrations' default (non
+    # include_deleted) view soft-deleted rows don't count toward any status.
+    stmt = (
+        select(Registration.status, func.count())
+        .where(Registration.deleted_at.is_(None))
+        .group_by(Registration.status)
+    )
+    rows = (await db.execute(stmt)).all()
+    counts = {status: 0 for status in RegistrationStatus}
+    for status, count in rows:
+        counts[status] = count
+    return counts
 
 
 async def list_registrations(
