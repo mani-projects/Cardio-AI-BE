@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -70,6 +70,10 @@ class Registration(Base):
     # register/stripe.ts's getAppliedCouponCode) — null for uncouponed and
     # pre-existing registrations captured before this column existed.
     coupon_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # What was actually charged (Stripe's amount_total, USD cents) and the
+    # resulting discount vs. list price — both null until paid (or backfilled).
+    amount_paid_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     follow_up_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
