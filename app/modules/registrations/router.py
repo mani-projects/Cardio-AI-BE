@@ -12,10 +12,10 @@ from app.modules.registrations.schemas import (
     ExpireRegistrationRequest,
     FollowUpSentRequest,
     PaginatedRegistrations,
+    RegistrationAnalytics,
     RegistrationCreateRequest,
     RegistrationPaidResponse,
     RegistrationRead,
-    RegistrationStatusCounts,
     RegistrationStatusUpdateRequest,
 )
 from app.modules.registrations.service import (
@@ -25,7 +25,7 @@ from app.modules.registrations.service import (
     create_pending_registration,
     delete_registration,
     get_registration,
-    get_registration_status_counts,
+    get_registration_analytics,
     list_registrations,
     list_user_registrations,
     mark_follow_up_sent,
@@ -119,18 +119,12 @@ async def list_registrations_endpoint(
     )
 
 
-@router.get("/stats", response_model=RegistrationStatusCounts)
-async def get_registration_status_counts_endpoint(
+@router.get("/analytics", response_model=RegistrationAnalytics)
+async def get_registration_analytics_endpoint(
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(require_roles(UserRole.ADMIN)),
-) -> RegistrationStatusCounts:
-    counts = await get_registration_status_counts(db)
-    return RegistrationStatusCounts(
-        pending=counts[RegistrationStatus.PENDING],
-        paid=counts[RegistrationStatus.PAID],
-        free=counts[RegistrationStatus.FREE],
-        expired=counts[RegistrationStatus.EXPIRED],
-    )
+) -> RegistrationAnalytics:
+    return RegistrationAnalytics(**await get_registration_analytics(db))
 
 
 @router.get("/mine", response_model=list[RegistrationRead])
@@ -207,7 +201,14 @@ async def update_registration_status_endpoint(
     except RegistrationNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found") from exc
 
-    registration = await update_registration_status(db, registration, payload.status)
+    registration = await update_registration_status(
+        db,
+        registration,
+        payload.status,
+        coupon_code=payload.coupon_code,
+        amount_paid_cents=payload.amount_paid_cents,
+        discount_percent=payload.discount_percent,
+    )
     return RegistrationRead.from_registration(registration)
 
 
