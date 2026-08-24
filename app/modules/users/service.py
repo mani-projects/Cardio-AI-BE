@@ -193,6 +193,17 @@ async def restore_user(db: AsyncSession, user: User) -> User:
     return user
 
 
+async def permanently_delete_user(db: AsyncSession, user: User) -> None:
+    # Admin-triggered, on-demand hard delete of an already-soft-deleted user
+    # skips the rest of the 3-day recovery window instead of waiting for the
+    # purge cron's sweep. Only valid on a row that's already in the Deleted
+    # bucket, same guard as restore_user.
+    if user.deleted_at is None:
+        raise UserNotDeletedError(user.id)
+    await db.delete(user)
+    await db.commit()
+
+
 async def purge_deleted_users(db: AsyncSession) -> int:
     cutoff = datetime.now(timezone.utc) - DELETED_RETENTION
     stmt = select(User).where(User.deleted_at.is_not(None), User.deleted_at < cutoff)
