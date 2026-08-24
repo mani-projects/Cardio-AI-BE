@@ -1,12 +1,14 @@
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import verify_internal_api_key
+from app.core.limiter import limiter
+from app.core.security import verify_internal_api_key, verify_login_secret_key
 from app.modules.auth.dependencies import require_roles
-from app.modules.auth.service import ResetTokenCooldownError, ResetTokenRateLimitedError
+from app.modules.auth.schemas import TokenResponse
+from app.modules.auth.service import ResetTokenCooldownError, ResetTokenRateLimitedError, impersonate_user
 from app.modules.courses.service import CourseNotFoundError
 from app.modules.registrations.schemas import RegistrationRead
 from app.modules.registrations.service import list_user_registrations
@@ -258,3 +260,30 @@ async def send_reset_email_endpoint(
             detail="A reset email was already sent recently. Please wait before sending another.",
         ) from exc
     return None
+
+
+@router.post("/{user_id}/impersonate", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def impersonate_user_endpoint(
+    request: Request,
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+    _secret: None = Depends(verify_login_secret_key),
+) -> TokenResponse:
+    try:
+        user = await get_user(db, user_id)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
+
+    # Never admin — this is a "see what Faculty/Learner sees" tool, not a way
+    # to obtain another admin's session even with the extra secret in hand.
+    if user.role == UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Can't log in as another admin.")
+    if user.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This user is deleted.")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This user's account is inactive.")
+
+    access_token, refresh_token = await impersonate_user(db, user)
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
