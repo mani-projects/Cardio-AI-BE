@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # ADMIN_SECRET.
     internal_api_key: str
 
+    # second factor an admin must type in (never stored in the browser/frontend
+    # env) before the "log in as this user" endpoint will issue tokens for
+    # someone else — deliberately never read by the frontend, only forwarded
+    # from whatever the admin typed into the confirmation dialog that request.
+    login_secret_key: str
+
     # base URL of the frontend (cardio-ai), used to build the password-reset link
     frontend_url: str = "http://localhost:3000"
 
