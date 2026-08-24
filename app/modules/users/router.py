@@ -32,6 +32,7 @@ from app.modules.users.service import (
     delete_user,
     get_user,
     list_users,
+    permanently_delete_user,
     purge_deleted_users,
     restore_user,
     send_claim_email,
@@ -209,6 +210,29 @@ async def restore_user_endpoint(
     except UserNotDeletedError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This user isn't deleted.") from exc
     return UserAdminRead.from_user(user)
+
+
+@router.delete("/{user_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def permanently_delete_user_endpoint(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> None:
+    if user_id == admin.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own account.")
+
+    try:
+        user = await get_user(db, user_id)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
+
+    try:
+        await permanently_delete_user(db, user)
+    except UserNotDeletedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="This user must be soft-deleted first."
+        ) from exc
+    return None
 
 
 @router.post("/purge-deleted", status_code=status.HTTP_200_OK)
