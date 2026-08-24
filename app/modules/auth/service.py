@@ -183,6 +183,16 @@ async def authenticate(db: AsyncSession, email: str, password: str) -> tuple[str
     return await _issue_tokens(db, user)
 
 
+async def impersonate_user(db: AsyncSession, target_user: User) -> tuple[str, str]:
+    """Admin-only "log in as this user" mint a real, ordinary token pair for
+    target_user without their password. Router-level auth (admin JWT + the
+    separate LOGIN_SECRET_KEY confirmation, plus the admin/teacher/learner
+    role restriction) all happen before this is called — by the time we're
+    here, issuing tokens is the same as any other successful login.
+    """
+    return await _issue_tokens(db, target_user)
+
+
 async def rotate_refresh_token(db: AsyncSession, user_id: uuid.UUID, token_id: uuid.UUID) -> tuple[str, str]:
     row = await db.get(RefreshToken, token_id)
     now = datetime.now(timezone.utc)
