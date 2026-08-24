@@ -114,7 +114,7 @@ async def submit_case_endpoint(
     category_id: uuid.UUID,
     payload: CreateCaseRequest,
     course: Course = Depends(require_course_faculty()),
-    current_user: User = Depends(require_roles(UserRole.TEACHER)),
+    current_user: User = Depends(require_roles(UserRole.TEACHER, UserRole.ADMIN)),
     db: AsyncSession = Depends(get_db),
 ) -> CaseRead:
     try:
