@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
+import jwt
 import pytest
 
+from app.core.config import get_settings
+from app.modules.auth.service import impersonate_user
 from app.modules.users.models import User, UserRole
 from app.modules.users.service import (
     UserNotDeletedError,
@@ -10,6 +13,25 @@ from app.modules.users.service import (
     purge_deleted_users,
     restore_user,
 )
+
+settings = get_settings()
+
+
+# ---------------------------------------------------------------------------
+# impersonate_user
+# ---------------------------------------------------------------------------
+
+
+async def test_impersonate_user_issues_a_real_token_pair_for_the_target(db_session, make_user):
+    target = await make_user(email="faculty@example.com", role=UserRole.TEACHER)
+
+    access_token, refresh_token = await impersonate_user(db_session, target)
+
+    access_claims = jwt.decode(access_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    refresh_claims = jwt.decode(refresh_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    assert access_claims["sub"] == str(target.id)
+    assert access_claims["role"] == "teacher"
+    assert refresh_claims["sub"] == str(target.id)
 
 
 # ---------------------------------------------------------------------------
