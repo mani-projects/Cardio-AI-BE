@@ -10,6 +10,7 @@ from app.modules.users.service import (
     UserNotDeletedError,
     delete_user,
     list_users,
+    permanently_delete_user,
     purge_deleted_users,
     restore_user,
 )
@@ -57,6 +58,22 @@ async def test_restore_user_clears_deleted_at(db_session, make_user):
     restored = await restore_user(db_session, user)
 
     assert restored.deleted_at is None
+
+
+async def test_permanently_delete_user_removes_an_already_soft_deleted_user(db_session, make_user):
+    user = await make_user()
+    await delete_user(db_session, user)
+
+    await permanently_delete_user(db_session, user)
+
+    assert await db_session.get(User, user.id) is None
+
+
+async def test_permanently_delete_user_raises_when_not_deleted(db_session, make_user):
+    user = await make_user()
+
+    with pytest.raises(UserNotDeletedError):
+        await permanently_delete_user(db_session, user)
 
 
 async def test_restore_user_raises_when_not_deleted(db_session, make_user):
