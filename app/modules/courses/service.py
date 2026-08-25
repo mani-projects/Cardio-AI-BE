@@ -3,7 +3,10 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.course_lectures.models import CourseLecture
+from app.modules.course_resources.models import CourseResource
 from app.modules.courses.models import Course, CourseFaculty
+from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.users.models import User, UserRole
 
 
@@ -103,6 +106,44 @@ async def list_faculty_courses(db: AsyncSession, user_id: uuid.UUID) -> list[Cou
     )
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def get_course_content_stats(
+    db: AsyncSession, course_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, dict[str, int]]:
+    stats = {course_id: {"resource_count": 0, "lecture_count": 0, "enrolled_count": 0} for course_id in course_ids}
+    if not course_ids:
+        return stats
+
+    resource_rows = await db.execute(
+        select(CourseResource.course_id, func.count())
+        .where(CourseResource.course_id.in_(course_ids))
+        .group_by(CourseResource.course_id)
+    )
+    for course_id, count in resource_rows.all():
+        stats[course_id]["resource_count"] = count
+
+    lecture_rows = await db.execute(
+        select(CourseLecture.course_id, func.count())
+        .where(CourseLecture.course_id.in_(course_ids))
+        .group_by(CourseLecture.course_id)
+    )
+    for course_id, count in lecture_rows.all():
+        stats[course_id]["lecture_count"] = count
+
+    enrolled_rows = await db.execute(
+        select(Registration.course_id, func.count())
+        .where(
+            Registration.course_id.in_(course_ids),
+            Registration.status.in_([RegistrationStatus.PAID, RegistrationStatus.FREE]),
+            Registration.deleted_at.is_(None),
+        )
+        .group_by(Registration.course_id)
+    )
+    for course_id, count in enrolled_rows.all():
+        stats[course_id]["enrolled_count"] = count
+
+    return stats
 
 
 async def assign_course_faculty(
