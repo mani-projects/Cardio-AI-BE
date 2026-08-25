@@ -87,7 +87,7 @@ async def create_resource_upload_url_endpoint(
         file_key, upload_url = create_upload_url(course_id=course.id, content_type=payload.content_type)
     except UnsupportedFileTypeError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are supported."
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF and DOCX files are supported."
         ) from exc
     return UploadUrlRead(upload_url=upload_url, file_key=file_key)
 
