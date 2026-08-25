@@ -24,6 +24,11 @@ class RejectCaseRequest(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class UpdateCaseStatusRequest(BaseModel):
+    status: CaseStatus
+    rejection_reason: str | None = None
+
+
 class CaseRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
