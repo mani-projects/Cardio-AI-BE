@@ -13,6 +13,7 @@ from app.modules.courses.schemas import (
     CourseFacultyRead,
     CourseRead,
     CourseUpdateRequest,
+    FacultyCourseStatsRead,
 )
 from app.modules.courses.service import (
     CourseFacultyAssignmentNotFoundError,
@@ -23,6 +24,7 @@ from app.modules.courses.service import (
     assign_course_faculty,
     get_course_by_slug,
     get_course_content_stats,
+    get_course_faculty_stats,
     list_course_faculty,
     list_courses,
     list_faculty_courses,
@@ -84,6 +86,16 @@ async def update_course_endpoint(
         db, course, title=payload.title, price_cents=payload.price_cents, is_active=payload.is_active
     )
     return CourseRead.model_validate(updated)
+
+
+@router.get("/{course_id}/faculty-stats", response_model=list[FacultyCourseStatsRead])
+async def get_course_faculty_stats_endpoint(
+    course: Course = Depends(get_course_or_404),
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> list[FacultyCourseStatsRead]:
+    stats = await get_course_faculty_stats(db, course.id)
+    return [FacultyCourseStatsRead(user_id=user_id, **counts) for user_id, counts in stats.items()]
 
 
 @router.get("/{course_id}/faculty", response_model=list[CourseFacultyRead])
