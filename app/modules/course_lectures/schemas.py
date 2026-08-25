@@ -36,7 +36,9 @@ class UpdateLectureRequest(BaseModel):
     sort_order: int | None = None
 
 
-# Faculty-facing management view — no presigned URL needed for a list/edit UI.
+# Faculty-facing management view — includes a playback URL so faculty can
+# preview what they uploaded (a link source's stored URL, or a freshly
+# minted presigned GET for an uploaded video).
 class CourseLectureFacultyRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -49,6 +51,22 @@ class CourseLectureFacultyRead(BaseModel):
     group_label: str | None
     sort_order: int
     created_at: datetime
+    playback_url: str
+
+    @classmethod
+    def from_lecture(cls, lecture: "CourseLecture", playback_url: str) -> "CourseLectureFacultyRead":
+        return cls(
+            id=lecture.id,
+            course_id=lecture.course_id,
+            title=lecture.title,
+            source=lecture.source,
+            video_url=lecture.video_url,
+            file_key=lecture.file_key,
+            group_label=lecture.group_label,
+            sort_order=lecture.sort_order,
+            created_at=lecture.created_at,
+            playback_url=playback_url,
+        )
 
 
 # Learner-facing playback view — carries a ready-to-use playback URL (the
