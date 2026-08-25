@@ -34,6 +34,18 @@ def test_create_upload_url_returns_prefixed_key_and_presigned_url():
     mock_put.assert_called_once_with(file_key, "application/pdf")
 
 
+def test_create_upload_url_accepts_docx_content_type():
+    course_id = uuid.uuid4()
+    docx_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    with patch("app.core.storage.generate_presigned_put_url", return_value="https://s3.example.com/put") as mock_put:
+        file_key, upload_url = create_upload_url(course_id=course_id, content_type=docx_type)
+
+    assert file_key.endswith(".docx")
+    assert upload_url == "https://s3.example.com/put"
+    mock_put.assert_called_once_with(file_key, docx_type)
+
+
 async def test_finalize_resource_rejects_key_from_a_different_course(db_session, make_course):
     course = await make_course(slug="1")
     other_course_id = uuid.uuid4()
