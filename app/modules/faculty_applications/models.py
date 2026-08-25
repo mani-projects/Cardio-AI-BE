@@ -22,6 +22,11 @@ class FacultyApplication(Base):
 
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # Optional: the course the applicant said they'd like to teach, if any.
+    # SET NULL (not CASCADE) so an application's history outlives the course.
+    course_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("courses.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     specialty: Mapped[str] = mapped_column(String(255), nullable=False)
     institution: Mapped[str] = mapped_column(String(255), nullable=False)
     country: Mapped[str] = mapped_column(String(100), nullable=False)
