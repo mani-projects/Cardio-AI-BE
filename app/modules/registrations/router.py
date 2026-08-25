@@ -31,6 +31,7 @@ from app.modules.registrations.service import (
     mark_follow_up_sent,
     mark_registration_expired,
     mark_registration_paid,
+    permanently_delete_registration,
     purge_deleted_registrations,
     restore_registration,
     update_registration_status,
@@ -168,6 +169,24 @@ async def delete_registration_endpoint(
             status_code=status.HTTP_409_CONFLICT,
             detail="Paid registrations can't be deleted — they're a financial record.",
         ) from exc
+    return None
+
+
+@router.delete("/{registration_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def permanently_delete_registration_endpoint(
+    registration_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> None:
+    try:
+        registration = await get_registration(db, registration_id)
+    except RegistrationNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found") from exc
+
+    try:
+        await permanently_delete_registration(db, registration)
+    except RegistrationNotDeletedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This registration isn't deleted.") from exc
     return None
 
 
