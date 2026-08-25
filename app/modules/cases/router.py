@@ -14,11 +14,13 @@ from app.modules.cases.schemas import (
     PaginatedCases,
     RejectCaseRequest,
     UpdateCaseRequest,
+    UpdateCaseStatusRequest,
 )
 from app.modules.cases.service import (
     CaseAlreadyReviewedError,
     CaseNotEditableError,
     CaseNotFoundError,
+    RejectionReasonRequiredError,
     approve_case,
     create_case,
     delete_case,
@@ -29,6 +31,7 @@ from app.modules.cases.service import (
     list_my_cases,
     reject_case,
     update_and_resubmit_case,
+    update_case_status,
 )
 from app.modules.courses.dependencies import require_course_faculty
 from app.modules.courses.models import Course
@@ -105,6 +108,29 @@ async def reject_case_endpoint(
         case = await reject_case(db, case, reviewer_id=admin.id, reason=payload.reason)
     except CaseAlreadyReviewedError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This case has already been reviewed.") from exc
+    return CaseRead.model_validate(case)
+
+
+@router.patch("/{case_id}/status", response_model=CaseRead)
+async def update_case_status_endpoint(
+    case_id: uuid.UUID,
+    payload: UpdateCaseStatusRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> CaseRead:
+    try:
+        case = await get_case(db, case_id)
+    except CaseNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found") from exc
+
+    try:
+        case = await update_case_status(
+            db, case, status=payload.status, reviewer_id=admin.id, rejection_reason=payload.rejection_reason
+        )
+    except RejectionReasonRequiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="A rejection reason is required."
+        ) from exc
     return CaseRead.model_validate(case)
 
 
