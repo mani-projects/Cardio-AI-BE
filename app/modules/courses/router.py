@@ -7,7 +7,13 @@ from app.core.database import get_db
 from app.modules.auth.dependencies import require_roles
 from app.modules.courses.dependencies import get_course_or_404
 from app.modules.courses.models import Course
-from app.modules.courses.schemas import AssignFacultyRequest, CourseFacultyRead, CourseRead, CourseUpdateRequest
+from app.modules.courses.schemas import (
+    AssignFacultyRequest,
+    CourseContentStatsRead,
+    CourseFacultyRead,
+    CourseRead,
+    CourseUpdateRequest,
+)
 from app.modules.courses.service import (
     CourseFacultyAssignmentNotFoundError,
     CourseNotFoundError,
@@ -16,6 +22,7 @@ from app.modules.courses.service import (
     UserNotFoundError,
     assign_course_faculty,
     get_course_by_slug,
+    get_course_content_stats,
     list_course_faculty,
     list_courses,
     list_faculty_courses,
@@ -44,6 +51,17 @@ async def list_my_assigned_courses_endpoint(
 ) -> list[CourseRead]:
     courses = await list_faculty_courses(db, current_user.id)
     return [CourseRead.model_validate(course) for course in courses]
+
+
+# Also registered before GET /{course_slug}, same reason as above.
+@router.get("/my-assignments/stats", response_model=list[CourseContentStatsRead])
+async def list_my_assigned_courses_stats_endpoint(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.TEACHER)),
+) -> list[CourseContentStatsRead]:
+    courses = await list_faculty_courses(db, current_user.id)
+    stats = await get_course_content_stats(db, [course.id for course in courses])
+    return [CourseContentStatsRead(course_id=course_id, **counts) for course_id, counts in stats.items()]
 
 
 @router.get("/{course_slug}", response_model=CourseRead)
