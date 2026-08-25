@@ -9,6 +9,7 @@ from app.modules.cases.service import (
     CaseNotFoundError,
     approve_case,
     create_case,
+    delete_case,
     get_case,
     get_case_for_learner,
     list_cases_admin,
@@ -119,13 +120,15 @@ async def test_reject_case_twice_raises_already_reviewed(
         await reject_case(db_session, case, reviewer_id=admin.id, reason="No, again.")
 
 
-async def test_update_and_resubmit_case_requires_rejected_status(
+async def test_update_and_resubmit_case_rejects_approved_status(
     db_session, make_course, make_case_category, make_user, make_case
 ):
     course = await make_course(slug="1")
     category = await make_case_category(course, name="CAD")
     faculty = await make_user(email="fac@example.com", role=UserRole.TEACHER)
+    admin = await make_user(email="admin@example.com", role=UserRole.ADMIN)
     case = await make_case(course, category, faculty)
+    await approve_case(db_session, case, reviewer_id=admin.id)
 
     with pytest.raises(CaseNotEditableError):
         await update_and_resubmit_case(db_session, case, title="New title")
@@ -148,6 +151,62 @@ async def test_update_and_resubmit_case_resets_to_pending_review(
     assert updated.rejection_reason is None
     assert updated.reviewed_by is None
     assert updated.reviewed_at is None
+
+
+async def test_update_case_while_pending_review_keeps_status(
+    db_session, make_course, make_case_category, make_user, make_case
+):
+    course = await make_course(slug="1")
+    category = await make_case_category(course, name="CAD")
+    faculty = await make_user(email="fac@example.com", role=UserRole.TEACHER)
+    case = await make_case(course, category, faculty)
+
+    updated = await update_and_resubmit_case(db_session, case, title="Fixed a typo")
+
+    assert updated.title == "Fixed a typo"
+    assert updated.status == CaseStatus.PENDING_REVIEW
+
+
+async def test_delete_case_removes_pending_case(
+    db_session, make_course, make_case_category, make_user, make_case
+):
+    course = await make_course(slug="1")
+    category = await make_case_category(course, name="CAD")
+    faculty = await make_user(email="fac@example.com", role=UserRole.TEACHER)
+    case = await make_case(course, category, faculty)
+
+    await delete_case(db_session, case)
+
+    with pytest.raises(CaseNotFoundError):
+        await get_case(db_session, case.id)
+
+
+async def test_delete_case_rejects_approved_case(
+    db_session, make_course, make_case_category, make_user, make_case
+):
+    course = await make_course(slug="1")
+    category = await make_case_category(course, name="CAD")
+    faculty = await make_user(email="fac@example.com", role=UserRole.TEACHER)
+    admin = await make_user(email="admin@example.com", role=UserRole.ADMIN)
+    case = await make_case(course, category, faculty)
+    await approve_case(db_session, case, reviewer_id=admin.id)
+
+    with pytest.raises(CaseNotEditableError):
+        await delete_case(db_session, case)
+
+
+async def test_delete_case_rejects_rejected_case(
+    db_session, make_course, make_case_category, make_user, make_case
+):
+    course = await make_course(slug="1")
+    category = await make_case_category(course, name="CAD")
+    faculty = await make_user(email="fac@example.com", role=UserRole.TEACHER)
+    admin = await make_user(email="admin@example.com", role=UserRole.ADMIN)
+    case = await make_case(course, category, faculty)
+    await reject_case(db_session, case, reviewer_id=admin.id, reason="No.")
+
+    with pytest.raises(CaseNotEditableError):
+        await delete_case(db_session, case)
 
 
 async def test_list_cases_admin_filters_by_status(
