@@ -21,6 +21,7 @@ from app.modules.cases.service import (
     CaseNotFoundError,
     approve_case,
     create_case,
+    delete_case,
     get_case,
     get_case_for_learner,
     list_cases_admin,
@@ -171,9 +172,31 @@ async def update_and_resubmit_case_endpoint(
         )
     except CaseNotEditableError as exc:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Only rejected cases can be edited and resubmitted."
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only pending or rejected cases can be edited and resubmitted.",
         ) from exc
     return CaseRead.model_validate(case)
+
+
+@faculty_router.delete("/cases/{case_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_case_endpoint(
+    case_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.TEACHER)),
+) -> None:
+    try:
+        case = await get_case(db, case_id)
+    except CaseNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found") from exc
+    if case.faculty_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This is not your case.")
+
+    try:
+        await delete_case(db, case)
+    except CaseNotEditableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Only pending cases can be deleted."
+        ) from exc
 
 
 @learner_router.get("/{course_id}/cases", response_model=list[CaseLearnerRead])
