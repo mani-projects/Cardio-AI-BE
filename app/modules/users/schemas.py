@@ -36,9 +36,10 @@ class UserAdminRead(BaseModel):
     # pre-provisioned (payment-only) account someone has since claimed.
     account_claimed: bool
     is_temporary_password: bool
+    course_titles: list[str] = []
 
     @classmethod
-    def from_user(cls, user: User) -> "UserAdminRead":
+    def from_user(cls, user: User, course_titles: list[str] | None = None) -> "UserAdminRead":
         return cls(
             id=user.id,
             email=user.email,
@@ -50,6 +51,7 @@ class UserAdminRead(BaseModel):
             deleted_at=user.deleted_at,
             account_claimed=user.hashed_password is not None,
             is_temporary_password=user.is_temporary_password,
+            course_titles=course_titles or [],
         )
 
 
