@@ -25,6 +25,10 @@ class CaseAlreadyReviewedError(CaseError):
     pass
 
 
+class RejectionReasonRequiredError(CaseError):
+    pass
+
+
 async def get_case(db: AsyncSession, case_id: uuid.UUID) -> Case:
     case = await db.get(Case, case_id)
     if case is None:
@@ -168,6 +172,43 @@ async def reject_case(db: AsyncSession, case: Case, *, reviewer_id: uuid.UUID, r
     case.rejection_reason = reason
     case.reviewed_by = reviewer_id
     case.reviewed_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(case)
+    return case
+
+
+async def update_case_status(
+    db: AsyncSession,
+    case: Case,
+    *,
+    status: CaseStatus,
+    reviewer_id: uuid.UUID,
+    rejection_reason: str | None = None,
+) -> Case:
+    # Admin override does not honor the pending-only guard approve_case/
+    # reject_case enforce  this is explicitly for undoing/correcting a
+    # mistaken review after the fact, in either direction.
+    if status == CaseStatus.REJECTED and not (rejection_reason and rejection_reason.strip()):
+        raise RejectionReasonRequiredError(case.id)
+
+    if status == CaseStatus.APPROVED:
+        if case.case_number is None:
+            case.case_number = await generate_case_number(db, case)
+        case.rejection_reason = None
+    else:
+        # Leaving APPROVED must not leave a stale case number a learner may
+        # already have seen referenced.
+        case.case_number = None
+        case.rejection_reason = rejection_reason.strip() if status == CaseStatus.REJECTED else None
+
+    case.status = status
+    if status == CaseStatus.PENDING_REVIEW:
+        case.reviewed_by = None
+        case.reviewed_at = None
+    else:
+        case.reviewed_by = reviewer_id
+        case.reviewed_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(case)
