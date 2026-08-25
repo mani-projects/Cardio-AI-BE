@@ -7,7 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import storage
 from app.modules.course_resources.models import CourseResource, ResourceCategory, ResourceViewState
 
-_SUPPORTED_CONTENT_TYPE = "application/pdf"
+_SUPPORTED_CONTENT_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 _KEY_PREFIX = "course-resources"
 
 
@@ -36,10 +39,11 @@ def _course_key_prefix(course_id: uuid.UUID) -> str:
 
 
 def create_upload_url(*, course_id: uuid.UUID, content_type: str) -> tuple[str, str]:
-    if content_type != _SUPPORTED_CONTENT_TYPE:
+    if content_type not in _SUPPORTED_CONTENT_TYPES:
         raise UnsupportedFileTypeError(content_type)
 
-    file_key = f"{_course_key_prefix(course_id)}{uuid.uuid4()}.pdf"
+    extension = "pdf" if content_type == "application/pdf" else "docx"
+    file_key = f"{_course_key_prefix(course_id)}{uuid.uuid4()}.{extension}"
     upload_url = storage.generate_presigned_put_url(file_key, content_type)
     return file_key, upload_url
 
