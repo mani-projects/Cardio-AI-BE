@@ -7,6 +7,7 @@ from app.modules.case_attempts.models import CaseAttempt, CaseAttemptStatus
 from app.modules.cases.models import Case, CaseStatus
 from app.modules.course_lectures.models import CourseLecture, LectureWatchState
 from app.modules.course_resources.models import CourseResource, ResourceViewState
+from app.modules.registrations.models import Registration, RegistrationStatus
 
 
 async def _count(db: AsyncSession, stmt: Select) -> int:
@@ -101,3 +102,21 @@ async def get_course_progress(db: AsyncSession, *, course_id: uuid.UUID, learner
         "cases_reviewed": cases_reviewed,
         "percent": percent,
     }
+
+
+async def list_course_students(db: AsyncSession, course_id: uuid.UUID) -> list[Registration]:
+    # user_id.is_not(None): a registration from before the claim-account flow
+    # (or a guest checkout) has no learner account yet, so there's no
+    # progress to compute for it.
+    stmt = (
+        select(Registration)
+        .where(
+            Registration.course_id == course_id,
+            Registration.status.in_([RegistrationStatus.PAID, RegistrationStatus.FREE]),
+            Registration.deleted_at.is_(None),
+            Registration.user_id.is_not(None),
+        )
+        .order_by(Registration.full_name)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
