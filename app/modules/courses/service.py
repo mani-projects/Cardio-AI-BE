@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.cases.models import Case, CaseStatus
 from app.modules.course_lectures.models import CourseLecture
 from app.modules.course_resources.models import CourseResource
 from app.modules.courses.models import Course, CourseFaculty
@@ -142,6 +143,47 @@ async def get_course_content_stats(
     )
     for course_id, count in enrolled_rows.all():
         stats[course_id]["enrolled_count"] = count
+
+    return stats
+
+
+async def get_course_faculty_stats(db: AsyncSession, course_id: uuid.UUID) -> dict[uuid.UUID, dict[str, int]]:
+    stats: dict[uuid.UUID, dict[str, int]] = {}
+
+    def bump(rows: list[tuple[uuid.UUID, int]], key: str) -> None:
+        for user_id, count in rows:
+            stats.setdefault(
+                user_id, {"resource_count": 0, "lecture_count": 0, "cases_submitted": 0, "cases_approved": 0}
+            )
+            stats[user_id][key] = count
+
+    resource_rows = await db.execute(
+        select(CourseResource.uploaded_by, func.count())
+        .where(CourseResource.course_id == course_id, CourseResource.uploaded_by.is_not(None))
+        .group_by(CourseResource.uploaded_by)
+    )
+    bump(list(resource_rows.all()), "resource_count")
+
+    lecture_rows = await db.execute(
+        select(CourseLecture.created_by, func.count())
+        .where(CourseLecture.course_id == course_id, CourseLecture.created_by.is_not(None))
+        .group_by(CourseLecture.created_by)
+    )
+    bump(list(lecture_rows.all()), "lecture_count")
+
+    submitted_rows = await db.execute(
+        select(Case.faculty_id, func.count())
+        .where(Case.course_id == course_id, Case.faculty_id.is_not(None))
+        .group_by(Case.faculty_id)
+    )
+    bump(list(submitted_rows.all()), "cases_submitted")
+
+    approved_rows = await db.execute(
+        select(Case.faculty_id, func.count())
+        .where(Case.course_id == course_id, Case.faculty_id.is_not(None), Case.status == CaseStatus.APPROVED)
+        .group_by(Case.faculty_id)
+    )
+    bump(list(approved_rows.all()), "cases_approved")
 
     return stats
 
