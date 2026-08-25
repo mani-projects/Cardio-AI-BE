@@ -1,3 +1,5 @@
+import uuid
+
 from pydantic import BaseModel
 
 
@@ -9,3 +11,9 @@ class CourseProgressRead(BaseModel):
     cases_total: int
     cases_reviewed: int
     percent: int
+
+
+class StudentProgressRead(CourseProgressRead):
+    user_id: uuid.UUID
+    full_name: str
+    email: str
