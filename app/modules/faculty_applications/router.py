@@ -13,9 +13,12 @@ from app.modules.faculty_applications.schemas import (
     FacultyApplicationRead,
     FacultyApplicationRejectRequest,
     PaginatedFacultyApplications,
+    UpdateFacultyApplicationStatusRequest,
+    UpdateFacultyApplicationStatusResponse,
 )
 from app.modules.faculty_applications.service import (
     ApplicationAlreadyReviewedError,
+    ApplicationRejectionReasonRequiredError,
     DuplicatePendingApplicationError,
     FacultyApplicationNotFoundError,
     approve_application,
@@ -23,6 +26,7 @@ from app.modules.faculty_applications.service import (
     get_application,
     list_applications,
     reject_application,
+    update_application_status,
 )
 from app.modules.users.models import User, UserRole
 from app.modules.users.schemas import UserAdminRead
@@ -108,6 +112,42 @@ async def approve_faculty_application_endpoint(
         application=FacultyApplicationRead.from_application(application),
         user=UserAdminRead.from_user(user),
         password=password,
+    )
+
+
+@router.patch("/{application_id}/status", response_model=UpdateFacultyApplicationStatusResponse)
+async def update_faculty_application_status_endpoint(
+    application_id: uuid.UUID,
+    payload: UpdateFacultyApplicationStatusRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> UpdateFacultyApplicationStatusResponse:
+    try:
+        application = await get_application(db, application_id)
+    except FacultyApplicationNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found") from exc
+
+    try:
+        application, password = await update_application_status(
+            db,
+            application,
+            status=payload.status,
+            admin_id=admin.id,
+            rejection_reason=payload.rejection_reason,
+            background_tasks=background_tasks,
+        )
+    except ApplicationRejectionReasonRequiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="A rejection reason is required."
+        ) from exc
+    except EmailAlreadyExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="A user with this email already exists."
+        ) from exc
+
+    return UpdateFacultyApplicationStatusResponse(
+        application=FacultyApplicationRead.from_application(application), password=password
     )
 
 
