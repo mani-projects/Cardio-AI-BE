@@ -1,8 +1,10 @@
 from app.modules.case_attempts.models import CaseAttemptStatus
 from app.modules.cases.models import CaseStatus
 from app.modules.course_lectures.service import mark_watched
-from app.modules.course_progress.service import compute_progress_percent, get_course_progress
+from app.modules.course_progress.service import compute_progress_percent, get_course_progress, list_course_students
 from app.modules.course_resources.service import mark_viewed
+from app.modules.registrations.models import RegistrationStatus
+from app.modules.registrations.service import delete_registration
 
 
 def test_compute_progress_percent_all_categories_empty():
@@ -165,3 +167,34 @@ async def test_get_course_progress_empty_course_is_zero_percent(db_session, make
         "cases_reviewed": 0,
         "percent": 0,
     }
+
+
+async def test_list_course_students_only_paid_and_free_with_accounts(
+    db_session, make_course, make_user, make_registration
+):
+    course = await make_course(slug="1")
+    paid_learner = await make_user(email="paid-student@example.com")
+    free_learner = await make_user(email="free-student@example.com")
+    pending_learner = await make_user(email="pending-student@example.com")
+    await make_registration(course, paid_learner, status=RegistrationStatus.PAID, email="paid-student@example.com")
+    await make_registration(course, free_learner, status=RegistrationStatus.FREE, email="free-student@example.com")
+    await make_registration(
+        course, pending_learner, status=RegistrationStatus.PENDING, email="pending-student@example.com"
+    )
+    # No linked user account yet (e.g. pre-claim-account) — must be excluded.
+    await make_registration(course, None, status=RegistrationStatus.PAID, email="no-account@example.com")
+
+    students = await list_course_students(db_session, course.id)
+
+    assert {s.user_id for s in students} == {paid_learner.id, free_learner.id}
+
+
+async def test_list_course_students_excludes_soft_deleted(db_session, make_course, make_user, make_registration):
+    course = await make_course(slug="1")
+    learner = await make_user(email="deleted-student@example.com")
+    registration = await make_registration(course, learner, status=RegistrationStatus.PAID)
+    await delete_registration(db_session, registration, allow_paid=True)
+
+    students = await list_course_students(db_session, course.id)
+
+    assert students == []
