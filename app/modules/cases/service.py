@@ -67,8 +67,10 @@ async def update_and_resubmit_case(
     answer_key_findings: dict | None = None,
     imaging_reference: dict | None = None,
 ) -> Case:
-    if case.status != CaseStatus.REJECTED:
+    if case.status not in (CaseStatus.REJECTED, CaseStatus.PENDING_REVIEW):
         raise CaseNotEditableError(case.id)
+
+    was_rejected = case.status == CaseStatus.REJECTED
 
     if title is not None:
         case.title = title
@@ -79,14 +81,23 @@ async def update_and_resubmit_case(
     if imaging_reference is not None:
         case.imaging_reference = imaging_reference
 
-    case.status = CaseStatus.PENDING_REVIEW
-    case.rejection_reason = None
-    case.reviewed_by = None
-    case.reviewed_at = None
+    if was_rejected:
+        case.status = CaseStatus.PENDING_REVIEW
+        case.rejection_reason = None
+        case.reviewed_by = None
+        case.reviewed_at = None
 
     await db.commit()
     await db.refresh(case)
     return case
+
+
+async def delete_case(db: AsyncSession, case: Case) -> None:
+    if case.status != CaseStatus.PENDING_REVIEW:
+        raise CaseNotEditableError(case.id)
+
+    await db.delete(case)
+    await db.commit()
 
 
 async def list_cases_admin(
