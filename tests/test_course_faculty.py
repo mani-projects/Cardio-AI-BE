@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 
+from app.modules.cases.service import approve_case
 from app.modules.courses.service import (
     DuplicateCourseFacultyError,
     CourseFacultyAssignmentNotFoundError,
@@ -9,6 +10,7 @@ from app.modules.courses.service import (
     UserNotFoundError,
     assign_course_faculty,
     get_course_content_stats,
+    get_course_faculty_stats,
     is_course_faculty,
     list_faculty_courses,
     remove_course_faculty,
@@ -114,3 +116,41 @@ async def test_get_course_content_stats_counts_resources_lectures_and_enrollment
 
 async def test_get_course_content_stats_empty_list_returns_empty_dict(db_session):
     assert await get_course_content_stats(db_session, []) == {}
+
+
+async def test_get_course_faculty_stats_groups_by_uploader(
+    db_session,
+    make_course,
+    make_case_category,
+    make_user,
+    make_course_resource,
+    make_course_lecture,
+    make_case,
+):
+    course = await make_course(slug="1")
+    category = await make_case_category(course, name="CAD")
+    faculty_a = await make_user(email="stats-fac-a@example.com", role=UserRole.TEACHER)
+    faculty_b = await make_user(email="stats-fac-b@example.com", role=UserRole.TEACHER)
+    admin = await make_user(email="stats-admin@example.com", role=UserRole.ADMIN)
+    await make_course_resource(course, uploaded_by=faculty_a.id)
+    await make_course_resource(course, uploaded_by=faculty_a.id)
+    await make_course_lecture(course, created_by=faculty_a.id)
+    submitted = await make_case(course, category, faculty_a, title="Submitted")
+    approved = await make_case(course, category, faculty_b, title="Approved")
+    await approve_case(db_session, approved, reviewer_id=admin.id)
+
+    stats = await get_course_faculty_stats(db_session, course.id)
+
+    assert stats[faculty_a.id] == {
+        "resource_count": 2,
+        "lecture_count": 1,
+        "cases_submitted": 1,
+        "cases_approved": 0,
+    }
+    assert stats[faculty_b.id] == {
+        "resource_count": 0,
+        "lecture_count": 0,
+        "cases_submitted": 1,
+        "cases_approved": 1,
+    }
+    assert submitted.faculty_id == faculty_a.id
