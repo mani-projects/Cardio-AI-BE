@@ -47,3 +47,10 @@ class CourseUpdateRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     price_cents: int | None = Field(default=None, ge=0)
     is_active: bool | None = None
+
+
+class CourseContentStatsRead(BaseModel):
+    course_id: uuid.UUID
+    resource_count: int
+    lecture_count: int
+    enrolled_count: int
