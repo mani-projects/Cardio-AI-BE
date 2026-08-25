@@ -54,3 +54,11 @@ class CourseContentStatsRead(BaseModel):
     resource_count: int
     lecture_count: int
     enrolled_count: int
+
+
+class FacultyCourseStatsRead(BaseModel):
+    user_id: uuid.UUID
+    resource_count: int
+    lecture_count: int
+    cases_submitted: int
+    cases_approved: int
