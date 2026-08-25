@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.mailer import send_claim_account_email, send_temporary_password_email
 from app.core.security import generate_temporary_password, hash_password
+from app.modules.courses.models import Course, CourseFaculty
+from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.auth.service import (
     create_and_send_reset_token,
     issue_claim_token,
@@ -92,6 +94,39 @@ async def list_users(
     stmt = stmt.order_by(User.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
     items = list((await db.execute(stmt)).scalars().all())
     return items, total
+
+
+async def get_user_course_titles(db: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
+    """Courses each user is registered in (learner) or assigned to (teacher).
+
+    Grouped in two queries for the whole page of users at once (never
+    per-row), so this stays cheap regardless of which roles are on the page.
+    """
+    titles: dict[uuid.UUID, list[str]] = {user_id: [] for user_id in user_ids}
+    if not user_ids:
+        return titles
+
+    registration_rows = await db.execute(
+        select(Registration.user_id, Course.title)
+        .join(Course, Course.id == Registration.course_id)
+        .where(
+            Registration.user_id.in_(user_ids),
+            Registration.status.in_([RegistrationStatus.PAID, RegistrationStatus.FREE]),
+            Registration.deleted_at.is_(None),
+        )
+    )
+    for user_id, title in registration_rows.all():
+        titles[user_id].append(title)
+
+    faculty_rows = await db.execute(
+        select(CourseFaculty.user_id, Course.title).join(Course, Course.id == CourseFaculty.course_id).where(
+            CourseFaculty.user_id.in_(user_ids)
+        )
+    )
+    for user_id, title in faculty_rows.all():
+        titles[user_id].append(title)
+
+    return titles
 
 
 async def send_claim_email(db: AsyncSession, user: User, background_tasks: BackgroundTasks) -> None:
