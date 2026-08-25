@@ -27,6 +27,10 @@ class DuplicatePendingApplicationError(FacultyApplicationError):
     pass
 
 
+class ApplicationRejectionReasonRequiredError(FacultyApplicationError):
+    pass
+
+
 async def _get_pending_by_email(db: AsyncSession, email: str) -> FacultyApplication | None:
     stmt = select(FacultyApplication).where(
         func.lower(FacultyApplication.email) == email.lower(),
@@ -43,6 +47,7 @@ async def create_application(db: AsyncSession, payload: FacultyApplicationCreate
     application = FacultyApplication(
         full_name=payload.full_name,
         email=payload.email,
+        course_id=payload.course_id,
         specialty=payload.specialty,
         institution=payload.institution,
         country=payload.country,
@@ -135,3 +140,44 @@ async def reject_application(
     await db.commit()
     await db.refresh(application)
     return application
+
+
+async def update_application_status(
+    db: AsyncSession,
+    application: FacultyApplication,
+    *,
+    status: FacultyApplicationStatus,
+    admin_id: uuid.UUID,
+    rejection_reason: str | None = None,
+    background_tasks: BackgroundTasks | None = None,
+) -> tuple[FacultyApplication, str | None]:
+    # Admin override — bypasses the pending-only guard approve_application/
+    # reject_application enforce, for correcting a mistaken decision after
+    # the fact. Moving AWAY from APPROVED deliberately does not touch/delete
+    # the Teacher account that may already have been created — only this
+    # application record's status changes. Returns a generated password
+    # only when this call is the one that actually creates the Teacher
+    # account (moving straight to APPROVED with no prior created_user_id).
+    if status == FacultyApplicationStatus.REJECTED and not (rejection_reason and rejection_reason.strip()):
+        raise ApplicationRejectionReasonRequiredError(application.id)
+
+    generated_password: str | None = None
+    if status == FacultyApplicationStatus.APPROVED and application.created_user_id is None:
+        if background_tasks is None:
+            raise ValueError("background_tasks is required to approve an application.")
+        user, generated_password, _ = await create_user(
+            db,
+            email=application.email,
+            full_name=application.full_name,
+            role=UserRole.TEACHER,
+            background_tasks=background_tasks,
+        )
+        application.created_user_id = user.id
+
+    application.status = status
+    application.rejection_reason = rejection_reason.strip() if status == FacultyApplicationStatus.REJECTED else None
+    application.reviewed_by = admin_id
+    application.reviewed_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(application)
+    return application, generated_password
