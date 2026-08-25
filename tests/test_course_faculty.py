@@ -8,10 +8,12 @@ from app.modules.courses.service import (
     NotATeacherError,
     UserNotFoundError,
     assign_course_faculty,
+    get_course_content_stats,
     is_course_faculty,
     list_faculty_courses,
     remove_course_faculty,
 )
+from app.modules.registrations.models import RegistrationStatus
 from app.modules.users.models import UserRole
 
 
@@ -89,3 +91,26 @@ async def test_list_faculty_courses_returns_all_assigned(db_session, make_course
 
     assert {c.slug for c in courses} == {"1", "1.5"}
     assert course_three.slug not in {c.slug for c in courses}
+
+
+async def test_get_course_content_stats_counts_resources_lectures_and_enrollments(
+    db_session, make_course, make_course_resource, make_course_lecture, make_registration
+):
+    course = await make_course(slug="1")
+    other_course = await make_course(slug="2")
+    await make_course_resource(course)
+    await make_course_resource(course)
+    await make_course_lecture(course)
+    await make_registration(course, status=RegistrationStatus.PAID)
+    await make_registration(course, status=RegistrationStatus.FREE)
+    await make_registration(course, status=RegistrationStatus.PENDING)
+    await make_course_resource(other_course)
+
+    stats = await get_course_content_stats(db_session, [course.id, other_course.id])
+
+    assert stats[course.id] == {"resource_count": 2, "lecture_count": 1, "enrolled_count": 2}
+    assert stats[other_course.id] == {"resource_count": 1, "lecture_count": 0, "enrolled_count": 0}
+
+
+async def test_get_course_content_stats_empty_list_returns_empty_dict(db_session):
+    assert await get_course_content_stats(db_session, []) == {}
