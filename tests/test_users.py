@@ -6,9 +6,11 @@ import pytest
 from app.core.config import get_settings
 from app.modules.auth.service import impersonate_user
 from app.modules.users.models import User, UserRole
+from app.modules.registrations.models import RegistrationStatus
 from app.modules.users.service import (
     UserNotDeletedError,
     delete_user,
+    get_user_course_titles,
     list_users,
     permanently_delete_user,
     purge_deleted_users,
@@ -132,3 +134,24 @@ async def test_list_users_deleted_combines_with_role_filter(db_session, make_use
 
     assert total == 1
     assert [item.id for item in items] == [deleted_teacher.id]
+
+
+async def test_get_user_course_titles_covers_learners_and_teachers(
+    db_session, make_user, make_course, make_registration, make_course_faculty
+):
+    course = await make_course(slug="1")
+    learner = await make_user(email="student@example.com", role=UserRole.LEARNER)
+    teacher = await make_user(email="prof@example.com", role=UserRole.TEACHER)
+    admin = await make_user(email="root@example.com", role=UserRole.ADMIN)
+    await make_registration(course, learner, status=RegistrationStatus.PAID)
+    await make_course_faculty(course, teacher)
+
+    titles = await get_user_course_titles(db_session, [learner.id, teacher.id, admin.id])
+
+    assert titles[learner.id] == [course.title]
+    assert titles[teacher.id] == [course.title]
+    assert titles[admin.id] == []
+
+
+async def test_get_user_course_titles_empty_list_returns_empty_dict(db_session):
+    assert await get_user_course_titles(db_session, []) == {}
