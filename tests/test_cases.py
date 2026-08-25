@@ -7,6 +7,7 @@ from app.modules.cases.service import (
     CaseAlreadyReviewedError,
     CaseNotEditableError,
     CaseNotFoundError,
+    RejectionReasonRequiredError,
     approve_case,
     create_case,
     delete_case,
@@ -17,6 +18,7 @@ from app.modules.cases.service import (
     list_my_cases,
     reject_case,
     update_and_resubmit_case,
+    update_case_status,
 )
 from app.modules.users.models import UserRole
 
@@ -284,3 +286,72 @@ async def test_get_case_for_learner_returns_approved_case(
     fetched = await get_case_for_learner(db_session, case.id)
 
     assert fetched.id == case.id
+
+
+async def test_update_case_status_undo_approval_clears_case_number(
+    db_session, make_course, make_case_category, make_user, make_case
+):
+    course = await make_course(slug="1")
+    category = await make_case_category(course, name="CAD")
+    faculty = await make_user(email="fac@example.com", role=UserRole.TEACHER)
+    admin = await make_user(email="admin@example.com", role=UserRole.ADMIN)
+    case = await make_case(course, category, faculty)
+    await approve_case(db_session, case, reviewer_id=admin.id)
+    assert case.case_number is not None
+
+    reverted = await update_case_status(
+        db_session, case, status=CaseStatus.PENDING_REVIEW, reviewer_id=admin.id
+    )
+
+    assert reverted.status == CaseStatus.PENDING_REVIEW
+    assert reverted.case_number is None
+    assert reverted.reviewed_by is None
+    assert reverted.reviewed_at is None
+
+
+async def test_update_case_status_bypasses_already_reviewed_guard(
+    db_session, make_course, make_case_category, make_user, make_case
+):
+    course = await make_course(slug="1")
+    category = await make_case_category(course, name="CAD")
+    faculty = await make_user(email="fac@example.com", role=UserRole.TEACHER)
+    admin = await make_user(email="admin@example.com", role=UserRole.ADMIN)
+    case = await make_case(course, category, faculty)
+    await reject_case(db_session, case, reviewer_id=admin.id, reason="No.")
+
+    approved = await update_case_status(db_session, case, status=CaseStatus.APPROVED, reviewer_id=admin.id)
+
+    assert approved.status == CaseStatus.APPROVED
+    assert approved.case_number is not None
+    assert approved.rejection_reason is None
+
+
+async def test_update_case_status_requires_reason_when_rejecting(
+    db_session, make_course, make_case_category, make_user, make_case
+):
+    course = await make_course(slug="1")
+    category = await make_case_category(course, name="CAD")
+    faculty = await make_user(email="fac@example.com", role=UserRole.TEACHER)
+    admin = await make_user(email="admin@example.com", role=UserRole.ADMIN)
+    case = await make_case(course, category, faculty)
+    await approve_case(db_session, case, reviewer_id=admin.id)
+
+    with pytest.raises(RejectionReasonRequiredError):
+        await update_case_status(db_session, case, status=CaseStatus.REJECTED, reviewer_id=admin.id)
+
+
+async def test_update_case_status_regenerates_case_number_on_reapprove(
+    db_session, make_course, make_case_category, make_user, make_case
+):
+    course = await make_course(slug="1")
+    category = await make_case_category(course, name="CAD")
+    faculty = await make_user(email="fac@example.com", role=UserRole.TEACHER)
+    admin = await make_user(email="admin@example.com", role=UserRole.ADMIN)
+    case = await make_case(course, category, faculty)
+    await approve_case(db_session, case, reviewer_id=admin.id)
+
+    await update_case_status(db_session, case, status=CaseStatus.PENDING_REVIEW, reviewer_id=admin.id)
+    assert case.case_number is None
+    reapproved = await update_case_status(db_session, case, status=CaseStatus.APPROVED, reviewer_id=admin.id)
+
+    assert reapproved.case_number is not None
