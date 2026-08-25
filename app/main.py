@@ -20,6 +20,7 @@ from app.modules.course_certificates.router import learner_router as course_cert
 from app.modules.course_lectures.router import faculty_router as course_lectures_faculty_router
 from app.modules.course_lectures.router import learner_router as course_lectures_learner_router
 from app.modules.course_progress.router import admin_router as course_progress_admin_router
+from app.modules.course_progress.router import faculty_router as course_progress_faculty_router
 from app.modules.course_progress.router import learner_router as course_progress_learner_router
 from app.modules.course_resources.router import faculty_router as course_resources_faculty_router
 from app.modules.course_resources.router import learner_router as course_resources_learner_router
@@ -68,6 +69,7 @@ app.include_router(course_certificates_learner_router, prefix="/api/v1")
 app.include_router(course_lectures_faculty_router, prefix="/api/v1")
 app.include_router(course_lectures_learner_router, prefix="/api/v1")
 app.include_router(course_progress_admin_router, prefix="/api/v1")
+app.include_router(course_progress_faculty_router, prefix="/api/v1")
 app.include_router(course_progress_learner_router, prefix="/api/v1")
 app.include_router(course_resources_faculty_router, prefix="/api/v1")
 app.include_router(course_resources_learner_router, prefix="/api/v1")
