@@ -318,6 +318,17 @@ async def restore_registration(db: AsyncSession, registration: Registration) -> 
     return registration
 
 
+async def permanently_delete_registration(db: AsyncSession, registration: Registration) -> None:
+    # Admin-triggered, on-demand hard delete of an already-soft-deleted
+    # registration — skips the rest of the 3-day recovery window instead of
+    # waiting for the purge cron's sweep. Only valid on a row that's already
+    # in the Expired/Deleted bucket, same guard as restore_registration.
+    if registration.deleted_at is None:
+        raise RegistrationNotDeletedError(registration.id)
+    await db.delete(registration)
+    await db.commit()
+
+
 async def purge_deleted_registrations(db: AsyncSession) -> int:
     cutoff = datetime.now(timezone.utc) - DELETED_RETENTION
     stmt = select(Registration).where(Registration.deleted_at.is_not(None), Registration.deleted_at < cutoff)
