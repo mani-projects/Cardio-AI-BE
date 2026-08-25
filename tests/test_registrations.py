@@ -17,6 +17,7 @@ from app.modules.registrations.service import (
     get_registration_analytics,
     mark_registration_expired,
     mark_registration_paid,
+    permanently_delete_registration,
     purge_deleted_registrations,
     restore_registration,
     update_registration_status,
@@ -313,6 +314,26 @@ async def test_restore_registration_raises_when_not_deleted(db_session, make_cou
 
     with pytest.raises(RegistrationNotDeletedError):
         await restore_registration(db_session, registration)
+
+
+async def test_permanently_delete_registration_removes_an_already_soft_deleted_registration(
+    db_session, make_course, make_registration
+):
+    course = await make_course(slug="1")
+    registration = await make_registration(course, status=RegistrationStatus.PAID)
+    await delete_registration(db_session, registration, allow_paid=True)
+
+    await permanently_delete_registration(db_session, registration)
+
+    assert await db_session.get(Registration, registration.id) is None
+
+
+async def test_permanently_delete_registration_raises_when_not_deleted(db_session, make_course, make_registration):
+    course = await make_course(slug="1")
+    registration = await make_registration(course, status=RegistrationStatus.PAID)
+
+    with pytest.raises(RegistrationNotDeletedError):
+        await permanently_delete_registration(db_session, registration)
 
 
 async def test_update_registration_status_flips_status_without_touching_existing_user(
