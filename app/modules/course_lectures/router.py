@@ -23,6 +23,7 @@ from app.modules.course_lectures.service import (
     list_lectures_for_course,
     list_lectures_for_course_faculty,
     mark_watched,
+    resolve_playback_url,
     update_lecture,
 )
 from app.modules.courses.dependencies import require_course_faculty
@@ -68,7 +69,7 @@ async def list_faculty_lectures_endpoint(
     db: AsyncSession = Depends(get_db),
 ) -> list[CourseLectureFacultyRead]:
     lectures = await list_lectures_for_course_faculty(db, course.id)
-    return [CourseLectureFacultyRead.model_validate(lecture) for lecture in lectures]
+    return [CourseLectureFacultyRead.from_lecture(lecture, resolve_playback_url(lecture)) for lecture in lectures]
 
 
 @faculty_router.post("/courses/{course_id}/lectures/upload-url", response_model=UploadUrlRead)
@@ -105,7 +106,7 @@ async def create_lecture_endpoint(
         sort_order=payload.sort_order,
         created_by=current_user.id,
     )
-    return CourseLectureFacultyRead.model_validate(lecture)
+    return CourseLectureFacultyRead.from_lecture(lecture, resolve_playback_url(lecture))
 
 
 @faculty_router.patch("/courses/{course_id}/lectures/{lecture_id}", response_model=CourseLectureFacultyRead)
@@ -131,7 +132,7 @@ async def update_lecture_endpoint(
         group_label=payload.group_label,
         sort_order=payload.sort_order,
     )
-    return CourseLectureFacultyRead.model_validate(lecture)
+    return CourseLectureFacultyRead.from_lecture(lecture, resolve_playback_url(lecture))
 
 
 @faculty_router.delete("/courses/{course_id}/lectures/{lecture_id}", status_code=status.HTTP_204_NO_CONTENT)
