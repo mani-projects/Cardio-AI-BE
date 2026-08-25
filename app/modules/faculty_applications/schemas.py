@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 class FacultyApplicationCreateRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=255)
     email: EmailStr
+    course_id: uuid.UUID | None = None
     specialty: str = Field(min_length=1, max_length=255)
     institution: str = Field(min_length=1, max_length=255)
     country: str = Field(min_length=1, max_length=100)
@@ -26,6 +27,7 @@ class FacultyApplicationRead(BaseModel):
     id: uuid.UUID
     full_name: str
     email: str
+    course_id: uuid.UUID | None
     specialty: str
     institution: str
     country: str
@@ -45,6 +47,7 @@ class FacultyApplicationRead(BaseModel):
             id=application.id,
             full_name=application.full_name,
             email=application.email,
+            course_id=application.course_id,
             specialty=application.specialty,
             institution=application.institution,
             country=application.country,
@@ -62,6 +65,18 @@ class FacultyApplicationRead(BaseModel):
 
 class FacultyApplicationRejectRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
+
+
+class UpdateFacultyApplicationStatusRequest(BaseModel):
+    status: FacultyApplicationStatus
+    rejection_reason: str | None = None
+
+
+class UpdateFacultyApplicationStatusResponse(BaseModel):
+    application: FacultyApplicationRead
+    # Set only when this call is the one that created the Teacher account
+    # (approving via status-override rather than the normal approve flow).
+    password: str | None = None
 
 
 class PaginatedFacultyApplications(BaseModel):
