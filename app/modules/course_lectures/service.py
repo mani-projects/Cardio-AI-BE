@@ -101,6 +101,12 @@ async def delete_lecture(db: AsyncSession, lecture: CourseLecture) -> None:
     await db.commit()
 
 
+def resolve_playback_url(lecture: CourseLecture) -> str:
+    if lecture.source == LectureSource.UPLOAD:
+        return storage.generate_presigned_get_url(lecture.file_key)
+    return lecture.video_url
+
+
 async def list_lectures_for_course(
     db: AsyncSession, course_id: uuid.UUID, *, learner_id: uuid.UUID | None = None
 ) -> list[tuple[CourseLecture, str, bool]]:
@@ -119,14 +125,7 @@ async def list_lectures_for_course(
         )
         watched_ids = set((await db.execute(watched_stmt)).scalars().all())
 
-    results: list[tuple[CourseLecture, str, bool]] = []
-    for lecture in lectures:
-        if lecture.source == LectureSource.UPLOAD:
-            playback_url = storage.generate_presigned_get_url(lecture.file_key)
-        else:
-            playback_url = lecture.video_url
-        results.append((lecture, playback_url, lecture.id in watched_ids))
-    return results
+    return [(lecture, resolve_playback_url(lecture), lecture.id in watched_ids) for lecture in lectures]
 
 
 async def list_lectures_for_course_faculty(db: AsyncSession, course_id: uuid.UUID) -> list[CourseLecture]:
