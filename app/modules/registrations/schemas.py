@@ -128,6 +128,15 @@ class RegistrationStatusUpdateRequest(BaseModel):
     discount_percent: int | None = None
 
 
+class RegistrationLinkStripeSessionRequest(BaseModel):
+    stripe_session_id: str = Field(min_length=1, max_length=255)
+    status: RegistrationStatus
+    coupon_code: str | None = Field(default=None, max_length=255)
+    amount_paid_cents: int | None = None
+    discount_percent: int | None = None
+    paid_at: datetime | None = None
+
+
 class PaginatedRegistrations(BaseModel):
     items: list[RegistrationRead]
     total: int
