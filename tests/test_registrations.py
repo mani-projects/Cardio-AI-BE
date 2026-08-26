@@ -8,11 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.registrations.schemas import RegistrationCreateRequest
 from app.modules.registrations.service import (
+    DuplicateStripeSessionError,
     RegistrationIsPaidError,
     RegistrationNotDeletedError,
     create_pending_registration,
     delete_registration,
     has_course_access,
+    link_stripe_session,
     list_registrations,
     get_registration_analytics,
     mark_registration_expired,
@@ -489,3 +491,85 @@ async def test_list_registrations_include_deleted_merges_expired_and_deleted(
     assert total == 2
     assert ids == {expired.id, deleted.id}
     assert active_paid.id not in ids
+
+
+async def test_list_registrations_q_matches_stripe_session_id(db_session, make_course, make_registration):
+    course = await make_course(slug="1")
+    target = await make_registration(course, status=RegistrationStatus.PAID, email="target@example.com")
+    target.stripe_session_id = "cs_live_lookup_me_12345"
+    await db_session.commit()
+    await make_registration(course, status=RegistrationStatus.PAID, email="other@example.com")
+
+    items, total = await list_registrations(db_session, q="lookup_me")
+
+    assert total == 1
+    assert [item.id for item in items] == [target.id]
+
+
+# ---------------------------------------------------------------------------
+# link_stripe_session
+# ---------------------------------------------------------------------------
+
+
+async def test_link_stripe_session_updates_session_id_and_provisions_user(
+    db_session, make_course, make_registration
+):
+    course = await make_course(slug="1")
+    registration = await make_registration(
+        course, status=RegistrationStatus.PENDING, email="manuallyadded@example.com"
+    )
+    assert registration.user_id is None
+
+    updated = await link_stripe_session(
+        db_session,
+        registration,
+        stripe_session_id="cs_live_real_session_123",
+        status=RegistrationStatus.PAID,
+        coupon_code="SAVE20",
+        amount_paid_cents=20000,
+        discount_percent=20,
+        paid_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
+    )
+
+    assert updated.stripe_session_id == "cs_live_real_session_123"
+    assert updated.status == RegistrationStatus.PAID
+    assert updated.coupon_code == "SAVE20"
+    assert updated.amount_paid_cents == 20000
+    assert updated.discount_percent == 20
+    assert updated.paid_at == datetime(2026, 1, 15, tzinfo=timezone.utc)
+    assert updated.user_id is not None
+
+    user = await db_session.get(User, updated.user_id)
+    assert user is not None
+    assert user.email == "manuallyadded@example.com"
+
+
+async def test_link_stripe_session_leaves_existing_user_untouched(db_session, make_course, make_user, make_registration):
+    course = await make_course(slug="1")
+    user = await make_user()
+    registration = await make_registration(course, user, status=RegistrationStatus.PAID)
+
+    updated = await link_stripe_session(
+        db_session,
+        registration,
+        stripe_session_id="cs_live_correction_456",
+        status=RegistrationStatus.PAID,
+    )
+
+    assert updated.user_id == user.id
+
+
+async def test_link_stripe_session_rejects_a_session_id_already_used_elsewhere(
+    db_session, make_course, make_registration
+):
+    course = await make_course(slug="1")
+    existing = await make_registration(course, status=RegistrationStatus.PAID, email="first@example.com")
+    target = await make_registration(course, status=RegistrationStatus.PENDING, email="second@example.com")
+
+    with pytest.raises(DuplicateStripeSessionError):
+        await link_stripe_session(
+            db_session,
+            target,
+            stripe_session_id=existing.stripe_session_id,
+            status=RegistrationStatus.PAID,
+        )
