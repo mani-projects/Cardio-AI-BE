@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.service import find_or_create_user_for_registration, issue_claim_token
@@ -25,6 +26,10 @@ class RegistrationIsPaidError(RegistrationError):
 
 
 class RegistrationNotDeletedError(RegistrationError):
+    pass
+
+
+class DuplicateStripeSessionError(RegistrationError):
     pass
 
 
@@ -309,6 +314,53 @@ async def update_registration_status(
     return registration
 
 
+async def link_stripe_session(
+    db: AsyncSession,
+    registration: Registration,
+    *,
+    stripe_session_id: str,
+    status: RegistrationStatus,
+    coupon_code: str | None = None,
+    amount_paid_cents: int | None = None,
+    discount_percent: int | None = None,
+    paid_at: datetime | None = None,
+) -> Registration:
+    """Admin-only: attach a real Stripe Checkout Session to an existing
+    registration row (a manually-added participant, or one whose original
+    session id was never recorded), pulling in whatever that session actually
+    shows. The caller (Next.js) has already retrieved the session from Stripe
+    directly — this just persists the result, mirroring
+    update_registration_status's PAID/FREE user-provisioning.
+    """
+    if registration.user_id is None and status in (RegistrationStatus.PAID, RegistrationStatus.FREE):
+        user, _claim_required = await find_or_create_user_for_registration(
+            db, registration.email, registration.full_name
+        )
+        registration.user_id = user.id if user is not None else None
+
+    registration.stripe_session_id = stripe_session_id
+    registration.status = status
+    if coupon_code is not None:
+        registration.coupon_code = coupon_code
+    if amount_paid_cents is not None:
+        registration.amount_paid_cents = amount_paid_cents
+    if discount_percent is not None:
+        registration.discount_percent = discount_percent
+    if paid_at is not None:
+        registration.paid_at = paid_at
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # The unique constraint on stripe_session_id — this session id is
+        # already linked to a different registration row.
+        await db.rollback()
+        raise DuplicateStripeSessionError(stripe_session_id) from exc
+
+    await db.refresh(registration)
+    return registration
+
+
 async def restore_registration(db: AsyncSession, registration: Registration) -> Registration:
     if registration.deleted_at is None:
         raise RegistrationNotDeletedError(registration.id)
@@ -438,7 +490,11 @@ async def list_registrations(
             count_stmt = count_stmt.where(Registration.status == status)
     if q:
         like = f"%{q}%"
-        search_clause = (Registration.email.ilike(like)) | (Registration.full_name.ilike(like))
+        search_clause = (
+            Registration.email.ilike(like)
+            | Registration.full_name.ilike(like)
+            | Registration.stripe_session_id.ilike(like)
+        )
         stmt = stmt.where(search_clause)
         count_stmt = count_stmt.where(search_clause)
 
