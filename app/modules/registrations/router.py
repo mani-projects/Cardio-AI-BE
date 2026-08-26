@@ -14,11 +14,13 @@ from app.modules.registrations.schemas import (
     PaginatedRegistrations,
     RegistrationAnalytics,
     RegistrationCreateRequest,
+    RegistrationLinkStripeSessionRequest,
     RegistrationPaidResponse,
     RegistrationRead,
     RegistrationStatusUpdateRequest,
 )
 from app.modules.registrations.service import (
+    DuplicateStripeSessionError,
     RegistrationIsPaidError,
     RegistrationNotDeletedError,
     RegistrationNotFoundError,
@@ -26,6 +28,7 @@ from app.modules.registrations.service import (
     delete_registration,
     get_registration,
     get_registration_analytics,
+    link_stripe_session,
     list_registrations,
     list_user_registrations,
     mark_follow_up_sent,
@@ -228,6 +231,37 @@ async def update_registration_status_endpoint(
         amount_paid_cents=payload.amount_paid_cents,
         discount_percent=payload.discount_percent,
     )
+    return RegistrationRead.from_registration(registration)
+
+
+@router.patch("/{registration_id}/link-stripe-session", response_model=RegistrationRead)
+async def link_stripe_session_endpoint(
+    registration_id: uuid.UUID,
+    payload: RegistrationLinkStripeSessionRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> RegistrationRead:
+    try:
+        registration = await get_registration(db, registration_id)
+    except RegistrationNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found") from exc
+
+    try:
+        registration = await link_stripe_session(
+            db,
+            registration,
+            stripe_session_id=payload.stripe_session_id,
+            status=payload.status,
+            coupon_code=payload.coupon_code,
+            amount_paid_cents=payload.amount_paid_cents,
+            discount_percent=payload.discount_percent,
+            paid_at=payload.paid_at,
+        )
+    except DuplicateStripeSessionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This Stripe session is already linked to another registration.",
+        ) from exc
     return RegistrationRead.from_registration(registration)
 
 
