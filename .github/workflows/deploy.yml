@@ -1,4 +1,4 @@
-name: Deploy to VPS
+name: Deploy to EC2
 
 on:
   push:
@@ -9,12 +9,12 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: SSH into VPS and deploy
+      - name: SSH into EC2 and deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: "72.167.44.58"
-          username: "cardioroot"
-          password: ${{ secrets.VPS_PASSWORD }}
+          host: "34.225.121.20"
+          username: "ubuntu"
+          key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd /opt/cardio-ai-server
             git pull
