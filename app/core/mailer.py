@@ -1,3 +1,4 @@
+import html
 import logging
 from email.message import EmailMessage
 
@@ -17,7 +18,7 @@ if settings.is_development:
     logger.propagate = False
 
 
-async def send_email(to: str, subject: str, html_body: str) -> None:
+async def send_email(to: str, subject: str, html_body: str, *, reply_to: str | None = None) -> None:
     if not settings.smtp_host:
         logger.warning("SMTP is not configured; skipping email to %s", to)
         return
@@ -26,6 +27,8 @@ async def send_email(to: str, subject: str, html_body: str) -> None:
     message["From"] = f"{settings.smtp_from_name} <{settings.smtp_from_email}>"
     message["To"] = to
     message["Subject"] = subject
+    if reply_to:
+        message["Reply-To"] = reply_to
     message.set_content("This email requires an HTML-capable client.")
     message.add_alternative(html_body, subtype="html")
 
@@ -217,3 +220,79 @@ async def send_temporary_password_email(to: str, full_name: str, password: str, 
         )
     except Exception:
         logger.exception("Failed to send temporary password email to %s", to)
+
+
+def _support_request_email_html(
+    *,
+    category_label: str,
+    course_title: str,
+    requester_name: str,
+    requester_email: str,
+    message: str,
+    screenshot_url: str | None,
+) -> str:
+    # message/requester_name/course_title are free-text a learner submitted —
+    # escape before interpolating into HTML, this isn't a server-generated
+    # value like the other templates in this file.
+    safe_message = html.escape(message).replace("\n", "<br>")
+    screenshot_block = (
+        f"""
+        <p style="text-align:center; margin:0 0 24px;">
+          <a href="{screenshot_url}" style="display:inline-block; background:#2563eb; color:#ffffff; font-size:14px; font-weight:600; text-decoration:none; border-radius:8px; padding:12px 28px;">
+            View attached screenshot
+          </a>
+        </p>
+        """
+        if screenshot_url
+        else ""
+    )
+    return f"""
+    <div style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:#f8fafc; padding:32px 0;">
+      <div style="max-width:480px; margin:0 auto; background:#ffffff; border-radius:16px; padding:40px 32px; border:1px solid #e5e7eb;">
+        <p style="font-size:13px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#2563eb; margin:0 0 16px;">
+          CardioAI &middot; {html.escape(category_label)}
+        </p>
+        <h1 style="font-size:20px; font-weight:700; color:#0f172a; margin:0 0 12px;">New support request</h1>
+        <p style="font-size:14px; color:#475569; margin:0 0 24px; line-height:1.6;">
+          {html.escape(requester_name)} ({html.escape(requester_email)}) sent this from
+          <strong>{html.escape(course_title)}</strong>. Reply directly to this email to respond.
+        </p>
+        <div style="background:#f1f5f9; border-radius:12px; padding:16px 20px; margin:0 0 24px; font-size:14px; color:#0f172a; line-height:1.6;">
+          {safe_message}
+        </div>
+        {screenshot_block}
+      </div>
+    </div>
+    """
+
+
+async def send_support_request_email(
+    to: str,
+    *,
+    category_label: str,
+    course_title: str,
+    requester_name: str,
+    requester_email: str,
+    message: str,
+    screenshot_url: str | None,
+) -> None:
+    if settings.is_development:
+        logger.info("Support request (%s) from %s for %s: %s", category_label, requester_email, course_title, message)
+        return
+
+    try:
+        await send_email(
+            to,
+            subject=f"[CardioAI] {category_label} — {course_title}",
+            html_body=_support_request_email_html(
+                category_label=category_label,
+                course_title=course_title,
+                requester_name=requester_name,
+                requester_email=requester_email,
+                message=message,
+                screenshot_url=screenshot_url,
+            ),
+            reply_to=requester_email,
+        )
+    except Exception:
+        logger.exception("Failed to send support request email to %s", to)
