@@ -129,6 +129,29 @@ async def get_user_course_titles(db: AsyncSession, user_ids: list[uuid.UUID]) ->
     return titles
 
 
+async def get_user_specialties(db: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, str | None]:
+    """Each user's medical specialty, as captured on their most recent registration.
+
+    A learner can hold registrations across multiple levels; specialty is a
+    per-registration field, so this takes the newest non-deleted one as the
+    representative value for the admin user list.
+    """
+    specialties: dict[uuid.UUID, str | None] = {user_id: None for user_id in user_ids}
+    if not user_ids:
+        return specialties
+
+    rows = await db.execute(
+        select(Registration.user_id, Registration.specialty)
+        .where(Registration.user_id.in_(user_ids), Registration.deleted_at.is_(None))
+        .order_by(Registration.created_at.desc())
+    )
+    for user_id, specialty in rows.all():
+        if specialties.get(user_id) is None:
+            specialties[user_id] = specialty
+
+    return specialties
+
+
 async def send_claim_email(db: AsyncSession, user: User, background_tasks: BackgroundTasks) -> None:
     if user.hashed_password is not None:
         raise UserAlreadyClaimedError(user.id)
