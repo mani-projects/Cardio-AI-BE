@@ -26,7 +26,12 @@ from app.modules.course_resources.router import faculty_router as course_resourc
 from app.modules.course_resources.router import learner_router as course_resources_learner_router
 from app.modules.courses.router import router as courses_router
 from app.modules.faculty_applications.router import router as faculty_applications_router
+from app.modules.mentor_chat.router import faculty_router as mentor_chat_faculty_router
+from app.modules.mentor_chat.router import router as mentor_chat_router
+from app.modules.mentor_chat.router import ws_router as mentor_chat_ws_router
 from app.modules.registrations.router import router as registrations_router
+from app.modules.support.router import admin_router as support_admin_router
+from app.modules.support.router import router as support_router
 from app.modules.users.router import router as users_router
 
 settings = get_settings()
@@ -75,7 +80,12 @@ app.include_router(course_resources_faculty_router, prefix="/api/v1")
 app.include_router(course_resources_learner_router, prefix="/api/v1")
 app.include_router(courses_router, prefix="/api/v1")
 app.include_router(faculty_applications_router, prefix="/api/v1")
+app.include_router(mentor_chat_faculty_router, prefix="/api/v1")
+app.include_router(mentor_chat_router, prefix="/api/v1")
+app.include_router(mentor_chat_ws_router, prefix="/api/v1")
 app.include_router(registrations_router, prefix="/api/v1")
+app.include_router(support_admin_router, prefix="/api/v1")
+app.include_router(support_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 
 
