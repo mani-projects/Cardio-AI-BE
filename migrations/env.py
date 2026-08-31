@@ -20,7 +20,9 @@ from app.modules.course_lectures import models as course_lectures_models  # noqa
 from app.modules.course_resources import models as course_resources_models  # noqa: F401
 from app.modules.courses import models as courses_models  # noqa: F401
 from app.modules.faculty_applications import models as faculty_applications_models  # noqa: F401
+from app.modules.mentor_chat import models as mentor_chat_models  # noqa: F401
 from app.modules.registrations import models as registrations_models  # noqa: F401
+from app.modules.support import models as support_models  # noqa: F401
 from app.modules.users import models as users_models  # noqa: F401
 
 # this is the Alembic Config object, which provides
