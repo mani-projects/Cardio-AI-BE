@@ -37,9 +37,14 @@ class UserAdminRead(BaseModel):
     account_claimed: bool
     is_temporary_password: bool
     course_titles: list[str] = []
+    # From the user's most recent registration, if any — see
+    # users.service.get_user_specialties.
+    specialty: str | None = None
 
     @classmethod
-    def from_user(cls, user: User, course_titles: list[str] | None = None) -> "UserAdminRead":
+    def from_user(
+        cls, user: User, course_titles: list[str] | None = None, specialty: str | None = None
+    ) -> "UserAdminRead":
         return cls(
             id=user.id,
             email=user.email,
@@ -52,6 +57,7 @@ class UserAdminRead(BaseModel):
             account_claimed=user.hashed_password is not None,
             is_temporary_password=user.is_temporary_password,
             course_titles=course_titles or [],
+            specialty=specialty,
         )
 
 
