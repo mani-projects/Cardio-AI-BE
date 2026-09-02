@@ -59,6 +59,44 @@ async def get_user(db: AsyncSession, user_id: uuid.UUID) -> User:
     return user
 
 
+async def get_preview_user(db: AsyncSession, role: UserRole) -> User | None:
+    """A real, active account of this role to back the admin's one-click
+    "preview the Faculty/Learner journey" shortcut. Prefers an account with
+    actual course access (a Faculty assignment, or a paid/free registration)
+    so the preview isn't a dead-empty dashboard falls back to any active
+    account of that role if none has course access yet.
+    """
+    base_clause = (User.role == role, User.deleted_at.is_(None), User.is_active.is_(True))
+
+    if role == UserRole.TEACHER:
+        with_access_stmt = (
+            select(User)
+            .join(CourseFaculty, CourseFaculty.user_id == User.id)
+            .where(*base_clause)
+            .order_by(User.created_at.desc())
+            .limit(1)
+        )
+    else:
+        with_access_stmt = (
+            select(User)
+            .join(Registration, Registration.user_id == User.id)
+            .where(
+                *base_clause,
+                Registration.status.in_([RegistrationStatus.PAID, RegistrationStatus.FREE]),
+                Registration.deleted_at.is_(None),
+            )
+            .order_by(User.created_at.desc())
+            .limit(1)
+        )
+
+    user = (await db.execute(with_access_stmt)).scalars().first()
+    if user is not None:
+        return user
+
+    fallback_stmt = select(User).where(*base_clause).order_by(User.created_at.desc()).limit(1)
+    return (await db.execute(fallback_stmt)).scalars().first()
+
+
 async def list_users(
     db: AsyncSession,
     *,
