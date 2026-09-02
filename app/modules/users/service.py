@@ -17,6 +17,7 @@ from app.modules.auth.service import (
 )
 from app.modules.registrations.service import create_free_registration
 from app.modules.users.models import User, UserRole
+from app.modules.users.schemas import UserCourseSummary
 
 settings = get_settings()
 
@@ -96,18 +97,18 @@ async def list_users(
     return items, total
 
 
-async def get_user_course_titles(db: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
+async def get_user_courses(db: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[UserCourseSummary]]:
     """Courses each user is registered in (learner) or assigned to (teacher).
 
     Grouped in two queries for the whole page of users at once (never
     per-row), so this stays cheap regardless of which roles are on the page.
     """
-    titles: dict[uuid.UUID, list[str]] = {user_id: [] for user_id in user_ids}
+    courses: dict[uuid.UUID, list[UserCourseSummary]] = {user_id: [] for user_id in user_ids}
     if not user_ids:
-        return titles
+        return courses
 
     registration_rows = await db.execute(
-        select(Registration.user_id, Course.title)
+        select(Registration.user_id, Course.slug, Course.title, Registration.attendance)
         .join(Course, Course.id == Registration.course_id)
         .where(
             Registration.user_id.in_(user_ids),
@@ -115,18 +116,18 @@ async def get_user_course_titles(db: AsyncSession, user_ids: list[uuid.UUID]) ->
             Registration.deleted_at.is_(None),
         )
     )
-    for user_id, title in registration_rows.all():
-        titles[user_id].append(title)
+    for user_id, slug, title, attendance in registration_rows.all():
+        courses[user_id].append(UserCourseSummary(slug=slug, title=title, attendance=attendance))
 
     faculty_rows = await db.execute(
-        select(CourseFaculty.user_id, Course.title).join(Course, Course.id == CourseFaculty.course_id).where(
+        select(CourseFaculty.user_id, Course.slug, Course.title).join(Course, Course.id == CourseFaculty.course_id).where(
             CourseFaculty.user_id.in_(user_ids)
         )
     )
-    for user_id, title in faculty_rows.all():
-        titles[user_id].append(title)
+    for user_id, slug, title in faculty_rows.all():
+        courses[user_id].append(UserCourseSummary(slug=slug, title=title))
 
-    return titles
+    return courses
 
 
 async def get_user_specialties(db: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, str | None]:
