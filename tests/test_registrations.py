@@ -506,6 +506,25 @@ async def test_list_registrations_q_matches_stripe_session_id(db_session, make_c
     assert [item.id for item in items] == [target.id]
 
 
+async def test_list_registrations_attendance_matches_loosely(db_session, make_course, make_registration):
+    course = await make_course(slug="2")
+    virtual = await make_registration(
+        course, status=RegistrationStatus.PAID, email="virtual@example.com", attendance="Fully Virtual"
+    )
+    hybrid = await make_registration(
+        course, status=RegistrationStatus.PAID, email="hybrid@example.com", attendance="Hybrid (in-person in Dubai)"
+    )
+    await make_registration(course, status=RegistrationStatus.PAID, email="unset@example.com")
+
+    virtual_items, virtual_total = await list_registrations(db_session, attendance="virtual")
+    hybrid_items, hybrid_total = await list_registrations(db_session, attendance="hybrid")
+
+    assert virtual_total == 1
+    assert [item.id for item in virtual_items] == [virtual.id]
+    assert hybrid_total == 1
+    assert [item.id for item in hybrid_items] == [hybrid.id]
+
+
 # ---------------------------------------------------------------------------
 # link_stripe_session
 # ---------------------------------------------------------------------------
