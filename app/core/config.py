@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # separate secret from JWT_SECRET_KEY/OTP_HMAC_SECRET on purpose — a leak
     # of one shouldn't compromise the others.
     reset_token_hmac_secret: str
-    reset_token_expire_minutes: int = 60
+    reset_token_expire_minutes: int = 360
     reset_token_resend_cooldown_seconds: int = 60
     reset_token_max_sends_per_day: int = 10
 
