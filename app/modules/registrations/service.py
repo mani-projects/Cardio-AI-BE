@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -459,6 +460,11 @@ async def list_registrations(
     *,
     course_id: uuid.UUID | None = None,
     status: RegistrationStatus | None = None,
+    # Only ever set on a Level II registration matched loosely (not
+    # `==`) since the column stores the learner's raw form pick verbatim
+    # ("Fully Virtual" / "Hybrid (in-person in Dubai)"), same bucketing
+    # AttendanceBadge uses on the frontend.
+    attendance: Literal["virtual", "hybrid"] | None = None,
     q: str | None = None,
     page: int = 1,
     page_size: int = 20,
@@ -470,6 +476,11 @@ async def list_registrations(
     if course_id is not None:
         stmt = stmt.where(Registration.course_id == course_id)
         count_stmt = count_stmt.where(Registration.course_id == course_id)
+
+    if attendance is not None:
+        pattern = f"%{attendance}%"
+        stmt = stmt.where(Registration.attendance.ilike(pattern))
+        count_stmt = count_stmt.where(Registration.attendance.ilike(pattern))
 
     if include_deleted:
         # The one merged "Expired/Deleted" admin view a soft-deleted paid
