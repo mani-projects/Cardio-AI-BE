@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.limiter import limiter
-from app.core.security import verify_internal_api_key, verify_login_secret_key
+from app.core.security import verify_internal_api_key
 from app.modules.auth.dependencies import require_roles
 from app.modules.auth.schemas import TokenResponse
 from app.modules.auth.service import ResetTokenCooldownError, ResetTokenRateLimitedError, impersonate_user
@@ -33,6 +33,7 @@ from app.modules.users.service import (
     delete_user,
     get_user,
     get_user_courses,
+    get_preview_user,
     get_user_specialties,
     list_users,
     permanently_delete_user,
@@ -314,7 +315,6 @@ async def impersonate_user_endpoint(
     user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(require_roles(UserRole.ADMIN)),
-    _secret: None = Depends(verify_login_secret_key),
 ) -> TokenResponse:
     try:
         user = await get_user(db, user_id)
@@ -322,13 +322,37 @@ async def impersonate_user_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found") from exc
 
     # Never admin — this is a "see what Faculty/Learner sees" tool, not a way
-    # to obtain another admin's session even with the extra secret in hand.
+    # to obtain another admin's session.
     if user.role == UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Can't log in as another admin.")
     if user.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This user is deleted.")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This user's account is inactive.")
+
+    access_token, refresh_token = await impersonate_user(db, user)
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/preview-impersonate", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def preview_impersonate_endpoint(
+    request: Request,
+    role: Literal["teacher", "learner"] = Query(...),
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_roles(UserRole.ADMIN)),
+) -> TokenResponse:
+    """One-click "Faculty/Learner journey preview" — picks a real, active
+    account of the given role on the admin's behalf (preferring one with
+    actual course access so the preview isn't empty) instead of requiring
+    the admin to find and impersonate a specific user from the Users table.
+    """
+    target_role = UserRole.TEACHER if role == "teacher" else UserRole.LEARNER
+    user = await get_preview_user(db, target_role)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"No {role} account available to preview yet."
+        )
 
     access_token, refresh_token = await impersonate_user(db, user)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
