@@ -183,6 +183,7 @@ def make_registration(
         status: RegistrationStatus = RegistrationStatus.PAID,
         full_name: str = "Test Learner",
         email: str = "learner@example.com",
+        attendance: str | None = None,
     ) -> Registration:
         registration = Registration(
             course_id=course.id,
@@ -195,6 +196,7 @@ def make_registration(
             city="Dubai",
             institution="Test Hospital",
             specialty="Cardiology",
+            attendance=attendance,
         )
         db_session.add(registration)
         await db_session.commit()
