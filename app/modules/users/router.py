@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +51,8 @@ async def list_users_endpoint(
     role: UserRole | None = Query(None),
     is_email_verified: bool | None = Query(None),
     deleted: bool = Query(False),
+    course: str | None = Query(None),
+    attendance: Literal["virtual", "hybrid"] | None = Query(None),
     q: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -57,7 +60,15 @@ async def list_users_endpoint(
     _admin: User = Depends(require_roles(UserRole.ADMIN)),
 ) -> PaginatedUsers:
     items, total = await list_users(
-        db, role=role, is_email_verified=is_email_verified, deleted=deleted, q=q, page=page, page_size=page_size
+        db,
+        role=role,
+        is_email_verified=is_email_verified,
+        deleted=deleted,
+        course_slug=course,
+        attendance=attendance,
+        q=q,
+        page=page,
+        page_size=page_size,
     )
     user_ids = [user.id for user in items]
     courses = await get_user_courses(db, user_ids)
