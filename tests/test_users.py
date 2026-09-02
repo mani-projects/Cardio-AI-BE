@@ -11,6 +11,7 @@ from app.modules.users.schemas import UserCourseSummary
 from app.modules.users.service import (
     UserNotDeletedError,
     delete_user,
+    get_preview_user,
     get_user_courses,
     list_users,
     permanently_delete_user,
@@ -208,3 +209,61 @@ async def test_get_user_courses_includes_attendance_for_level_two(
 
 async def test_get_user_courses_empty_list_returns_empty_dict(db_session):
     assert await get_user_courses(db_session, []) == {}
+
+
+# ---------------------------------------------------------------------------
+# get_preview_user
+# ---------------------------------------------------------------------------
+
+
+async def test_get_preview_user_prefers_teacher_with_a_course_assignment(
+    db_session, make_user, make_course, make_course_faculty
+):
+    course = await make_course(slug="1")
+    idle_teacher = await make_user(email="idle@example.com", role=UserRole.TEACHER)
+    assigned_teacher = await make_user(email="assigned@example.com", role=UserRole.TEACHER)
+    await make_course_faculty(course, assigned_teacher)
+
+    preview = await get_preview_user(db_session, UserRole.TEACHER)
+
+    assert preview is not None
+    assert preview.id == assigned_teacher.id
+    assert preview.id != idle_teacher.id
+
+
+async def test_get_preview_user_prefers_learner_with_a_registration(
+    db_session, make_user, make_course, make_registration
+):
+    course = await make_course(slug="1")
+    idle_learner = await make_user(email="idle@example.com", role=UserRole.LEARNER)
+    registered_learner = await make_user(email="registered@example.com", role=UserRole.LEARNER)
+    await make_registration(course, registered_learner, status=RegistrationStatus.PAID)
+
+    preview = await get_preview_user(db_session, UserRole.LEARNER)
+
+    assert preview is not None
+    assert preview.id == registered_learner.id
+    assert preview.id != idle_learner.id
+
+
+async def test_get_preview_user_falls_back_to_any_active_account_of_the_role(db_session, make_user):
+    teacher = await make_user(email="prof@example.com", role=UserRole.TEACHER)
+
+    preview = await get_preview_user(db_session, UserRole.TEACHER)
+
+    assert preview is not None
+    assert preview.id == teacher.id
+
+
+async def test_get_preview_user_excludes_deleted_and_inactive_accounts(db_session, make_user):
+    deleted_teacher = await make_user(email="deleted@example.com", role=UserRole.TEACHER)
+    await delete_user(db_session, deleted_teacher)
+    await make_user(email="inactive@example.com", role=UserRole.TEACHER, is_active=False)
+
+    preview = await get_preview_user(db_session, UserRole.TEACHER)
+
+    assert preview is None
+
+
+async def test_get_preview_user_returns_none_when_no_account_of_that_role_exists(db_session):
+    assert await get_preview_user(db_session, UserRole.TEACHER) is None
