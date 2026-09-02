@@ -137,6 +137,44 @@ async def test_list_users_deleted_combines_with_role_filter(db_session, make_use
     assert [item.id for item in items] == [deleted_teacher.id]
 
 
+async def test_list_users_course_filter_covers_learners_and_teachers(
+    db_session, make_user, make_course, make_registration, make_course_faculty
+):
+    level_two = await make_course(slug="2")
+    level_one = await make_course(slug="1")
+    learner = await make_user(email="learner@example.com", role=UserRole.LEARNER)
+    teacher = await make_user(email="teacher@example.com", role=UserRole.TEACHER)
+    other = await make_user(email="other@example.com", role=UserRole.LEARNER)
+    await make_registration(level_two, learner, status=RegistrationStatus.PAID)
+    await make_course_faculty(level_two, teacher)
+    await make_registration(level_one, other, status=RegistrationStatus.PAID)
+
+    items, total = await list_users(db_session, course_slug="2")
+
+    assert total == 2
+    assert {item.id for item in items} == {learner.id, teacher.id}
+
+
+async def test_list_users_attendance_filter_matches_loosely(
+    db_session, make_user, make_course, make_registration
+):
+    course = await make_course(slug="2")
+    virtual = await make_user(email="virtual@example.com", role=UserRole.LEARNER)
+    hybrid = await make_user(email="hybrid@example.com", role=UserRole.LEARNER)
+    await make_registration(course, virtual, status=RegistrationStatus.PAID, attendance="Fully Virtual")
+    await make_registration(
+        course, hybrid, status=RegistrationStatus.PAID, attendance="Hybrid (in-person in Dubai)"
+    )
+
+    virtual_items, virtual_total = await list_users(db_session, attendance="virtual")
+    hybrid_items, hybrid_total = await list_users(db_session, attendance="hybrid")
+
+    assert virtual_total == 1
+    assert [item.id for item in virtual_items] == [virtual.id]
+    assert hybrid_total == 1
+    assert [item.id for item in hybrid_items] == [hybrid.id]
+
+
 async def test_get_user_courses_covers_learners_and_teachers(
     db_session, make_user, make_course, make_registration, make_course_faculty
 ):
