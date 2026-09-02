@@ -73,15 +73,6 @@ async def verify_internal_api_key(x_internal_api_key: str = Header(...)) -> None
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
 
-async def verify_login_secret_key(x_login_secret_key: str = Header(...)) -> None:
-    # Second factor on top of an already-authenticated admin JWT for the
-    # "log in as this user" endpoint — a compromised/left-open admin browser
-    # session alone isn't enough to impersonate someone; the admin also has
-    # to know this separate, never-stored-in-the-browser secret.
-    if not hmac.compare_digest(x_login_secret_key, settings.login_secret_key):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid login secret key")
-
-
 def _create_token(
     subject: str,
     expires_delta: timedelta,
