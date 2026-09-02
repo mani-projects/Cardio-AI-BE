@@ -43,6 +43,16 @@ async def send_email(to: str, subject: str, html_body: str, *, reply_to: str | N
     )
 
 
+def _format_duration_minutes(minutes: int) -> str:
+    # Reads naturally regardless of the underlying settings value — e.g. a
+    # 360-minute reset-link expiry should say "6 hours" in the email, not
+    # "360 minutes".
+    if minutes >= 60 and minutes % 60 == 0:
+        hours = minutes // 60
+        return f"{hours} hour" if hours == 1 else f"{hours} hours"
+    return f"{minutes} minute" if minutes == 1 else f"{minutes} minutes"
+
+
 def _otp_email_html(full_name: str, code: str, expire_minutes: int) -> str:
     return f"""
     <div style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:#f8fafc; padding:32px 0;">
@@ -52,7 +62,7 @@ def _otp_email_html(full_name: str, code: str, expire_minutes: int) -> str:
         </p>
         <h1 style="font-size:20px; font-weight:700; color:#0f172a; margin:0 0 12px;">Verify your email</h1>
         <p style="font-size:14px; color:#475569; margin:0 0 24px; line-height:1.6;">
-          Hi {full_name}, use this code to finish setting up your CardioAI account. It expires in {expire_minutes} minutes.
+          Hi {full_name}, use this code to finish setting up your CardioAI account. It expires in {_format_duration_minutes(expire_minutes)}.
         </p>
         <p style="font-size:36px; font-weight:700; letter-spacing:0.2em; color:#0f172a; background:#f1f5f9; border-radius:12px; padding:16px 0; text-align:center; margin:0 0 24px;">
           {code}
@@ -92,7 +102,7 @@ def _password_reset_email_html(full_name: str, reset_link: str, expire_minutes: 
         </p>
         <h1 style="font-size:20px; font-weight:700; color:#0f172a; margin:0 0 12px;">Reset your password</h1>
         <p style="font-size:14px; color:#475569; margin:0 0 24px; line-height:1.6;">
-          Hi {full_name}, we received a request to reset your CardioAI password. This link expires in {expire_minutes} minutes.
+          Hi {full_name}, we received a request to reset your CardioAI password. This link expires in {_format_duration_minutes(expire_minutes)}.
         </p>
         <p style="text-align:center; margin:0 0 24px;">
           <a href="{reset_link}" style="display:inline-block; background:#2563eb; color:#ffffff; font-size:14px; font-weight:600; text-decoration:none; border-radius:8px; padding:12px 28px;">
