@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import BackgroundTasks
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -64,6 +65,8 @@ async def list_users(
     role: UserRole | None = None,
     is_email_verified: bool | None = None,
     deleted: bool = False,
+    course_slug: str | None = None,
+    attendance: Literal["virtual", "hybrid"] | None = None,
     q: str | None = None,
     page: int = 1,
     page_size: int = 20,
@@ -84,6 +87,44 @@ async def list_users(
     if is_email_verified is not None:
         stmt = stmt.where(User.is_email_verified == is_email_verified)
         count_stmt = count_stmt.where(User.is_email_verified == is_email_verified)
+    if course_slug is not None:
+        # EXISTS rather than a join+DISTINCT: a learner can hold more than
+        # one registration, and a join would inflate both the page rows and
+        # `total`. Registration (learner) and CourseFaculty (teacher) both
+        # count as "has this course" — matches what get_user_courses shows
+        # per row below, so the filter and the Course(s) column agree.
+        registered = (
+            select(Registration.id)
+            .join(Course, Course.id == Registration.course_id)
+            .where(
+                Registration.user_id == User.id,
+                Registration.status.in_([RegistrationStatus.PAID, RegistrationStatus.FREE]),
+                Registration.deleted_at.is_(None),
+                Course.slug == course_slug,
+            )
+        )
+        assigned = (
+            select(CourseFaculty.id)
+            .join(Course, Course.id == CourseFaculty.course_id)
+            .where(CourseFaculty.user_id == User.id, Course.slug == course_slug)
+        )
+        has_course = exists(registered) | exists(assigned)
+        stmt = stmt.where(has_course)
+        count_stmt = count_stmt.where(has_course)
+    if attendance is not None:
+        # Only ever set on a Level II registration matched loosely, same
+        # bucketing AttendanceBadge uses on the frontend — filtering by it
+        # alone already implies course_slug == "2".
+        has_attendance = exists(
+            select(Registration.id).where(
+                Registration.user_id == User.id,
+                Registration.status.in_([RegistrationStatus.PAID, RegistrationStatus.FREE]),
+                Registration.deleted_at.is_(None),
+                Registration.attendance.ilike(f"%{attendance}%"),
+            )
+        )
+        stmt = stmt.where(has_attendance)
+        count_stmt = count_stmt.where(has_attendance)
     if q:
         like = f"%{q}%"
         search_clause = (User.email.ilike(like)) | (User.full_name.ilike(like))
