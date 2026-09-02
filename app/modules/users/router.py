@@ -31,7 +31,7 @@ from app.modules.users.service import (
     create_user,
     delete_user,
     get_user,
-    get_user_course_titles,
+    get_user_courses,
     get_user_specialties,
     list_users,
     permanently_delete_user,
@@ -60,11 +60,11 @@ async def list_users_endpoint(
         db, role=role, is_email_verified=is_email_verified, deleted=deleted, q=q, page=page, page_size=page_size
     )
     user_ids = [user.id for user in items]
-    course_titles = await get_user_course_titles(db, user_ids)
+    courses = await get_user_courses(db, user_ids)
     specialties = await get_user_specialties(db, user_ids)
     return PaginatedUsers(
         items=[
-            UserAdminRead.from_user(user, course_titles.get(user.id), specialties.get(user.id)) for user in items
+            UserAdminRead.from_user(user, courses.get(user.id), specialties.get(user.id)) for user in items
         ],
         total=total,
         page=page,
