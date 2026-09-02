@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -99,6 +100,7 @@ async def mark_follow_up_sent_endpoint(
 async def list_registrations_endpoint(
     course_id: uuid.UUID | None = Query(None),
     status_filter: RegistrationStatus | None = Query(None, alias="status"),
+    attendance: Literal["virtual", "hybrid"] | None = Query(None),
     include_deleted: bool = Query(False),
     q: str | None = Query(None),
     page: int = Query(1, ge=1),
@@ -110,6 +112,7 @@ async def list_registrations_endpoint(
         db,
         course_id=course_id,
         status=status_filter,
+        attendance=attendance,
         q=q,
         page=page,
         page_size=page_size,
