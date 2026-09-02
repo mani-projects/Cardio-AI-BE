@@ -20,6 +20,15 @@ class UserPublic(BaseModel):
     is_temporary_password: bool
 
 
+class UserCourseSummary(BaseModel):
+    slug: str
+    title: str
+    # From the learner's registration for this course — "Fully Virtual" or
+    # the in-person/hybrid option text, Level II only. Null for faculty
+    # assignments and for levels that don't offer a format choice.
+    attendance: str | None = None
+
+
 class UserAdminRead(BaseModel):
     # No from_attributes / model_validate(user) for this one, deliberately —
     # see from_user() below. That keeps `hashed_password` from ever having a
@@ -36,14 +45,14 @@ class UserAdminRead(BaseModel):
     # pre-provisioned (payment-only) account someone has since claimed.
     account_claimed: bool
     is_temporary_password: bool
-    course_titles: list[str] = []
+    courses: list[UserCourseSummary] = []
     # From the user's most recent registration, if any — see
     # users.service.get_user_specialties.
     specialty: str | None = None
 
     @classmethod
     def from_user(
-        cls, user: User, course_titles: list[str] | None = None, specialty: str | None = None
+        cls, user: User, courses: list[UserCourseSummary] | None = None, specialty: str | None = None
     ) -> "UserAdminRead":
         return cls(
             id=user.id,
@@ -56,7 +65,7 @@ class UserAdminRead(BaseModel):
             deleted_at=user.deleted_at,
             account_claimed=user.hashed_password is not None,
             is_temporary_password=user.is_temporary_password,
-            course_titles=course_titles or [],
+            courses=courses or [],
             specialty=specialty,
         )
 
