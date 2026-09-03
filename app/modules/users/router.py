@@ -33,7 +33,6 @@ from app.modules.users.service import (
     delete_user,
     get_user,
     get_user_courses,
-    get_preview_user,
     get_user_specialties,
     list_users,
     permanently_delete_user,
@@ -329,30 +328,6 @@ async def impersonate_user_endpoint(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This user is deleted.")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This user's account is inactive.")
-
-    access_token, refresh_token = await impersonate_user(db, user)
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
-
-
-@router.post("/preview-impersonate", response_model=TokenResponse)
-@limiter.limit("10/minute")
-async def preview_impersonate_endpoint(
-    request: Request,
-    role: Literal["teacher", "learner"] = Query(...),
-    db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_roles(UserRole.ADMIN)),
-) -> TokenResponse:
-    """One-click "Faculty/Learner journey preview" — picks a real, active
-    account of the given role on the admin's behalf (preferring one with
-    actual course access so the preview isn't empty) instead of requiring
-    the admin to find and impersonate a specific user from the Users table.
-    """
-    target_role = UserRole.TEACHER if role == "teacher" else UserRole.LEARNER
-    user = await get_preview_user(db, target_role)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"No {role} account available to preview yet."
-        )
 
     access_token, refresh_token = await impersonate_user(db, user)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
